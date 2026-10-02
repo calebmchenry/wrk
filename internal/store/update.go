@@ -81,7 +81,7 @@ func updateWithOptions(root, id string, opts UpdateOptions, h *hooks) Mutation {
 	if err := opts.Changes.Validate(); err != nil {
 		return Mutation{Diagnostics: []diagnostic.Diagnostic{diagnostic.New("USAGE", err.Error(), "")}}
 	}
-	if opts.Recursive && (opts.Title != nil || opts.Status != nil) {
+	if opts.Recursive && (opts.Title != nil || opts.Status != nil || opts.Priority != nil) {
 		return Mutation{Diagnostics: []diagnostic.Diagnostic{diagnostic.New("USAGE", "--recursive permits only label changes", "")}}
 	}
 	return withLock(root, func(s *project.Snapshot) (result Mutation) {

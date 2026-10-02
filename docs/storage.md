@@ -78,7 +78,8 @@ report uncertain durability. Cleanup failures identify remaining staging names.
 After an error, interrupt, killed process, or failed output, inspect the root and
 all descendants (`show <root>` and `list --all --under <root>`). Read ticket source
 as needed, resolve the reported cause, then rerun the same label operation.
-Add/remove is idempotent: already-applied changes become no-ops and pending changes
+All label modes (replacement, clear, add/remove) are idempotent: already-applied
+changes become no-ops and pending changes
 can finish. A retry selects a **fresh** descendant snapshot, so it also includes
 children added since the original invocation. Confirm the scope if relationships
 changed. No automatic inheritance, transaction journal, or rollback is provided.

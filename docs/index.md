@@ -14,8 +14,8 @@ Use this project's own CLI to track work in [`.wrk/`](../.wrk/). Follow the [dai
 Agents may edit ticket bodies directly. Creation and changes to frontmatter, relationships, or status go through the CLI. Project configuration may be edited directly.
 
 The CLI supports initialization, creation with parent/priority/label overrides,
-list/show/validate, title/status updates (including blocked), and single-ticket or
-recursive label add/remove operations. Lists can filter labels and descendants.
+list/show/validate, title/status/priority updates (including blocked), and
+single-ticket or recursive label replacement/clear/add/remove operations. Lists can filter labels and descendants.
 Other metadata updates remain deferred; do not edit them manually. Direct body/config edits and Git operations must occur outside CLI mutations; see the accepted [external-editor boundary](storage.md).
 
 ## Daily workflow

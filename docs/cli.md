@@ -18,7 +18,9 @@
 | `wrk list --under id` | Descendants at every depth, excluding the root. Intersects label and status/readiness filters. |
 | `wrk show id` | Full source plus derived children and unfinished dependency blockers. |
 | `wrk update id --title "Title" --status in-progress` | Either or both flags, one validated mutation. No-op reports `changed: false`, without rewriting. |
-| `wrk update id --add-label burn --remove-label triage` | Repeatable, idempotent label edits; may combine with title/status. |
+| `wrk update id --add-label burn --remove-label triage` | Repeatable, idempotent label edits; may combine with title/status/priority. |
+| `wrk update id --priority high --label cli --label storage` | Set priority and replace the entire label list. |
+| `wrk update id --no-labels` | Clear labels; absent/already-empty labels are a no-op. |
 | `wrk update id --add-label burn --recursive` | Labels only; root plus all descendants, regardless of status. Per-ticket publication results. |
 | `wrk validate` | Aggregate determinable errors without writes. |
 
@@ -26,13 +28,43 @@ Every command accepts `--json` and `--help`. Flags may precede or follow positio
 arguments after the command; global `--json` also precedes the command. Support
 `--flag=value` and `--` to end option parsing. A value beginning with `--` must use
 `--flag=value`. Unknown/repeated scalar flags, surplus arguments, empty updates,
-`list --all --ready`, and `new --label ... --no-labels` are usage errors.
+`list --all --ready`, and `--label ... --no-labels` on new/update are usage errors.
 
 Titles are nonblank single-line strings; supplied spacing is retained. Priorities
 are `low`, `normal`, `high`, `urgent`; statuses are `todo`, `in-progress`, `blocked`,
 `done`, `canceled`. Duplicate labels remain allowed. Only `done` satisfies a dependency.
 Explicit changes on blocked tickets and reopening are allowed. Nothing cascades.
-General relationship, priority, label replacement/clear, and custom-field update flags are deferred.
+General relationship and custom-field update flags are deferred.
+
+## Priority and replacement updates
+
+`update --priority` accepts `low`, `normal`, `high`, or `urgent`. An omitted source
+priority has the fixed effective value `normal`; setting it to normal is a no-op
+and leaves the field omitted, even alongside other changes. Setting a different
+priority inserts the field. Invalid priority values fail candidate validation
+(exit 1, `INVALID_TICKET`) without publishing any part of a combined update.
+Repeated scalar flags such as `--priority` are usage errors (exit 2).
+
+Repeated `update --label value` **replaces the entire label list** with the values
+in argument order, including duplicates. An identical ordered list is a no-op;
+reordering or changing duplicate counts is a source change even though summaries
+sort labels. `update --no-labels` clears the list. Clearing absent or already-empty
+labels is a no-op; clearing nonempty labels writes `labels: []`.
+
+The label modes are mutually exclusive:
+
+| Mode | Flags | Conflicts |
+| --- | --- | --- |
+| Replacement | One or more `--label` | `--no-labels`, any add/remove flag |
+| Clear | `--no-labels` | `--label`, any add/remove flag |
+| Incremental | Repeated `--add-label` and/or `--remove-label` | Replacement/clear; adding and removing the same value |
+
+Conflicts are `USAGE` regardless of flag order or the current labels. Empty or
+non-UTF-8 label arguments are also usage errors. Priority, title, and status can
+combine with any one label mode in one validated single-ticket mutation. All
+updates preserve exact bodies, unrelated YAML semantics, omitted fields, and
+permission bits; no-ops preserve source bytes and file identity. Project creation
+defaults never influence updates or change existing tickets.
 
 ## Scopes and label mutations
 
@@ -53,9 +85,11 @@ creation defaults never affect these edits.
 
 Adding and removing the same label in one invocation is `USAGE`, independent of
 flag order. `--recursive` requires at least one label mutation and rejects title,
-status, or other metadata edits. Unsupported flags (`--label`, `--no-labels`,
-priority, relationships, custom fields on update) remain errors. Single-ticket
-label edits can combine with title/status as one validated update.
+status, priority, or other metadata edits. It supports replacement, clearing, and
+incremental label modes with the same conflicts described above. Recursive
+replacement/clearing changes each target's entire label list; use add/remove to
+retain unrelated labels. Relationship and custom-field update flags remain
+unsupported.
 
 Recursive labeling selects the root **and** all descendants, at every depth and
 in every status, following parent edges only. It applies a snapshot, not

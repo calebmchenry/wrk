@@ -18,11 +18,14 @@ Usage:
   wrk list [--all | --ready] [--label value ...] [--under id]
   wrk show <id>
   wrk update <id> [--title "Title"] [--status todo|in-progress|blocked|done|canceled]
-                  [--add-label value ...] [--remove-label value ...]
-                  [--recursive]
+                  [--priority low|normal|high|urgent]
+                  [--label value ... | --no-labels |
+                   --add-label value ... --remove-label value ...] [--recursive]
   wrk validate
   wrk help [command]
 
+Update --label replaces the entire label list; --no-labels clears it.
+Replacement/clear conflict with add/remove; either add or remove may be used alone.
 Label filters require ALL labels; --under excludes the root. Filters intersect.
 Ready means todo with every dependency done. Blocked stays active, never ready.
 Recursive updates include the root and all descendants, regardless of status;

@@ -56,15 +56,20 @@ func Equal(a, b *yaml.Node) bool {
 }
 
 type Changes struct {
-	Title, Status           *string
+	Title, Status, Priority *string
 	AddLabels, RemoveLabels []string
+	Labels                  []string
+	LabelsSet               bool
 }
 
 func (c Changes) Validate() error {
-	if c.Title == nil && c.Status == nil && len(c.AddLabels) == 0 && len(c.RemoveLabels) == 0 {
-		return fmt.Errorf("update requires --title, --status, --add-label, or --remove-label")
+	if c.Title == nil && c.Status == nil && c.Priority == nil && !c.LabelsSet && len(c.AddLabels) == 0 && len(c.RemoveLabels) == 0 {
+		return fmt.Errorf("update requires --title, --status, --priority, --label, --no-labels, --add-label, or --remove-label")
 	}
-	for _, labels := range [][]string{c.AddLabels, c.RemoveLabels} {
+	if c.LabelsSet && (len(c.AddLabels) > 0 || len(c.RemoveLabels) > 0) {
+		return fmt.Errorf("--label/--no-labels conflict with --add-label/--remove-label")
+	}
+	for _, labels := range [][]string{c.Labels, c.AddLabels, c.RemoveLabels} {
 		for _, label := range labels {
 			if label == "" || !utf8.ValidString(label) {
 				return fmt.Errorf("labels must be nonempty UTF-8 strings")
@@ -93,9 +98,12 @@ func PatchChanges(t *Ticket, c Changes) ([]byte, bool, error) {
 	}
 	changes := map[string]*yaml.Node{}
 	old := schema.Map(t.Node)
-	for key, v := range map[string]*string{"title": c.Title, "status": c.Status} {
+	for key, v := range map[string]*string{"title": c.Title, "status": c.Status, "priority": c.Priority} {
 		if v != nil {
 			s, _ := schema.String(old[key])
+			if key == "priority" && old[key] == nil {
+				s = "normal"
+			}
 			if s != *v {
 				changes[key] = stringNode(*v)
 			}
@@ -113,6 +121,9 @@ func PatchChanges(t *Ticket, c Changes) ([]byte, bool, error) {
 			next = append(next, label)
 		}
 	}
+	if c.LabelsSet {
+		next = c.Labels
+	}
 	if !slices.Equal(labels, next) {
 		node := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 		for _, label := range next {
@@ -128,7 +139,7 @@ func PatchChanges(t *Ticket, c Changes) ([]byte, bool, error) {
 	// Detach aliases of removed definitions, including a labels sequence and its
 	// anchored elements. Built-in edited values resolve only to strings/lists of
 	// strings, so copying them cannot expand arbitrary custom alias graphs.
-	for _, key := range []string{"title", "status", "labels"} {
+	for _, key := range []string{"title", "status", "priority", "labels"} {
 		if changes[key] == nil {
 			continue
 		}
@@ -174,9 +185,11 @@ func PatchChanges(t *Ticket, c Changes) ([]byte, bool, error) {
 			n.Content[i+1] = v
 		}
 	}
-	if changes["labels"] != nil && old["labels"] == nil {
-		n.Content = append(n.Content, stringNode("labels"), changes["labels"])
-		inserted++
+	for _, key := range []string{"priority", "labels"} {
+		if changes[key] != nil && old[key] == nil {
+			n.Content = append(n.Content, stringNode(key), changes[key])
+			inserted++
+		}
 	}
 	data, err := encode(n, t.Body)
 	if err != nil {

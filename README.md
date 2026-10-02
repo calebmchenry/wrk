@@ -64,8 +64,24 @@ wrk list --json
 
 Use `new --parent <id>` for children. Creation supports `--priority`, repeated
 `--label` (replaces configured labels), and `--no-labels`. Updates support
-`--title`, `--status`, repeated `--add-label`, and repeated `--remove-label`. General parent/dependency, priority, label replacement/clear,
-and custom field updates remain follow-up work.
+`--title`, `--status`, `--priority`, repeated `--label` to replace the entire label
+list, `--no-labels` to clear it, and repeated `--add-label` / `--remove-label` for
+incremental edits. General parent/dependency and custom field updates remain
+follow-up work.
+
+```sh
+wrk update <id> --priority urgent --label backend --label cli
+wrk update <id> --no-labels
+wrk update <id> --priority normal --add-label reviewed --remove-label needs-triage
+```
+
+Priority is `low`, `normal`, `high`, or `urgent`. Replacement/clearing conflicts
+with add/remove flags, and `--label` conflicts with `--no-labels`. Any one label
+mode can combine with title/status/priority in a single validated update.
+Replacement preserves supplied order and duplicates in source; JSON summaries
+sort labels. Unchanged values are no-ops, including clearing absent labels or
+setting an omitted priority to its effective value `normal`. Creation defaults
+never change existing tickets or influence updates.
 
 Bare `wrk` prints help. Flags may come before or after positional arguments;
 `--flag=value` and `--` are supported. Every command supports `--json`, including
@@ -88,7 +104,9 @@ wrk update <id> --status todo
 Add/remove flags repeat and preserve unrelated labels; adding an existing label
 or removing an absent one is a no-op. Adding and removing the same label conflicts.
 Recursive updates permit labels only and include the root plus all descendants,
-even done/canceled tickets. Labels are a snapshot, not inheritance: supply
+even done/canceled tickets. Replacement (`--label`) and clearing (`--no-labels`)
+also work recursively and affect each target's entire label list; use add/remove
+to preserve unrelated labels. Title, status, and priority cannot be recursive. Labels are a snapshot, not inheritance: supply
 `new --parent <id> --label burn-tonight` for later subtasks. `list --under` excludes
 the root. Repeated label filters require **all** labels; label, descendant, and
 status filters intersect. Dependencies outside the scope still affect readiness.

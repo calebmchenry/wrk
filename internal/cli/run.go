@@ -100,7 +100,7 @@ func Run(args []string, cwd string, in io.Reader, out, errout io.Writer) int {
 		return renderMutation(out, errout, r, e, result)
 	}
 	if r.Command == "update" {
-		result := store.UpdateWithOptions(root, r.Args[0], store.UpdateOptions{Changes: ticket.Changes{Title: r.Title, Status: r.Status, AddLabels: r.AddLabels, RemoveLabels: r.RemoveLabels}, Recursive: r.Recursive})
+		result := store.UpdateWithOptions(root, r.Args[0], store.UpdateOptions{Changes: r.changes(), Recursive: r.Recursive})
 		return renderMutation(out, errout, r, e, result)
 	}
 	s := project.Load(root)

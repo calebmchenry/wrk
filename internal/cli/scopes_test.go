@@ -29,7 +29,7 @@ func TestScopeArguments(t *testing.T) {
 		{"update", "id", "--add-label=a", "--remove-label=a"},
 		{"update", "id", "--add-label="}, {"update", "id", "--remove-label="},
 		{"update", "id", "--add-label=\xff"}, {"list", "--label=\xff"},
-		{"update", "id", "--add-label"}, {"update", "id", "--label=a"},
+		{"update", "id", "--add-label"}, {"update", "id", "--label="},
 		{"update", "id", "--add-label=a", "--no-labels"},
 		{"update", "id", "--add-label=a", "--recursive", "--recursive"},
 		{"list", "--label="}, {"list", "--under=a", "--under=b"}, {"list", "--under"},

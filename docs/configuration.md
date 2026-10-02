@@ -23,6 +23,13 @@ fields: {}
 
 New tickets default to `todo`. Explicit creation arguments override configured defaults, including an explicitly empty label list. Defaults apply only to new tickets: changing configuration never rewrites or changes the meaning of existing ticket values. IDs, parents, and dependencies do not have configurable defaults.
 
+Updates use existing ticket values, never creation defaults. An omitted priority
+always means `normal` and omitted labels always mean an empty list. Thus
+`update --priority normal` or `update --no-labels` does not insert already-effective
+omitted values. `update --label` replaces an existing list rather than combining
+it with configured defaults; use `--add-label` / `--remove-label` for incremental
+edits. See [priority and replacement updates](cli.md#priority-and-replacement-updates).
+
 ## Custom fields
 
 Custom definitions provide descriptions and optional, lightweight value checks:

@@ -17,7 +17,7 @@ type Request struct {
 
 var commandFlags = map[string]map[string]bool{
 	"init": {}, "new": {"body-file": true, "parent": true, "priority": true, "label": true, "no-labels": false},
-	"list": {"all": false, "ready": false, "label": true, "under": true}, "show": {}, "update": {"title": true, "status": true, "add-label": true, "remove-label": true, "recursive": false}, "validate": {}, "help": {},
+	"list": {"all": false, "ready": false, "label": true, "under": true}, "show": {}, "update": {"title": true, "status": true, "priority": true, "label": true, "no-labels": false, "add-label": true, "remove-label": true, "recursive": false}, "validate": {}, "help": {},
 }
 
 func Parse(args []string) (Request, error) {
@@ -134,10 +134,10 @@ func Parse(args []string) (Request, error) {
 		return r, fmt.Errorf("%s expects %d to %d positional arguments", r.Command, min, max)
 	}
 	if r.Command == "update" {
-		if err := (ticket.Changes{Title: r.Title, Status: r.Status, AddLabels: r.AddLabels, RemoveLabels: r.RemoveLabels}).Validate(); err != nil {
+		if err := r.changes().Validate(); err != nil {
 			return r, err
 		}
-		if r.Recursive && (r.Title != nil || r.Status != nil) {
+		if r.Recursive && (r.Title != nil || r.Status != nil || r.Priority != nil) {
 			return r, fmt.Errorf("--recursive permits only label changes")
 		}
 	}
@@ -149,6 +149,15 @@ func Parse(args []string) (Request, error) {
 		}
 	}
 	return r, nil
+}
+
+// changes translates the command's label mode once for validation and mutation.
+func (r Request) changes() ticket.Changes {
+	return ticket.Changes{
+		Title: r.Title, Status: r.Status, Priority: r.Priority,
+		AddLabels: r.AddLabels, RemoveLabels: r.RemoveLabels,
+		Labels: r.Labels, LabelsSet: r.NoLabels || len(r.Labels) > 0,
+	}
 }
 
 // JSONRequested also recognizes JSON on a malformed invocation, respecting --.
