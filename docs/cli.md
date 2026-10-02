@@ -5,6 +5,9 @@
 | Command | Behavior |
 | --- | --- |
 | `wrk`, `wrk --help`, `wrk help [command]` | Help, exit 0, no project discovery. |
+| `wrk version`, `wrk --version` | Version, commit, build kind, and platform; offline, no project discovery. |
+| `wrk upgrade --check` | Check the latest stable release without local writes. |
+| `wrk upgrade` | Verify and atomically install a newer standalone release binary. |
 | `wrk init [directory]` | Existing target directory, default cwd. Exclusively create `.wrk` and the [default config](configuration.md). Refuse any existing entry. |
 | `wrk new "Title"` | Create a `todo` ticket with configured prefix, priority, and labels; print ID/path. |
 | `wrk new "Title" --body-file path` | Exact UTF-8 body bytes; `-` reads stdin through EOF before locking. |
@@ -29,6 +32,76 @@ arguments after the command; global `--json` also precedes the command. Support
 `--flag=value` and `--` to end option parsing. A value beginning with `--` must use
 `--flag=value`. Unknown/repeated scalar flags, surplus arguments, empty updates,
 `list --all --ready`, and `--label ... --no-labels` on new/update are usage errors.
+
+## Version and upgrade
+
+`version` and `upgrade` dispatch before cwd/project discovery and validation, so
+invalid projects or unsupported project formats do not prevent an upgrade.
+`--version` aliases `version` and supports `--json`. `upgrade` only accepts
+`--check`, `--json`, and `--help`; pinned versions, force, downgrade, prerelease,
+private-repository authentication, and custom release sources are not supported.
+Ordinary ticket commands and version/help never contact the network.
+
+Both commands use the existing envelope with `project_root: null`. Version's
+result contains `version`, `commit`, `build_kind`, `goos`, and `goarch`.
+Plain builds report `dev`/`development`; snapshot packaging reports `snapshot`.
+Stable release builds have a canonical `X.Y.Z` version, a full Git commit, and
+`build_kind: "release"`. See the [shared release contract](releases.md).
+
+Upgrade results contain `current_version`, `latest_version`, `available`, and
+`changed`. `available` is boolean for comparable stable releases, or null with
+an explanatory `reason` for development/unknown metadata. `--check` creates no
+stages, locks, caches, or project files. Successful checks exit 0 regardless of
+availability. Installation adds `destination`, and sets `changed: true` and
+`publication: "committed"` after replacement. Same/newer versions return a no-op.
+
+The client uses anonymous HTTPS to the fixed public `calebmchenry/wrk` latest
+release endpoint. Drafts, prereleases, malformed versions, missing/duplicate
+assets, and URLs outside the selected repository/tag/asset contract are rejected.
+Redirects must stay HTTPS (at most five); requests time out after 30 seconds.
+Responses are bounded to 2 MiB metadata, 1 MiB manifest, and 64 MiB archive.
+The expanded executable is limited to 128 MiB with 1 MiB archive overhead.
+SHA-256 is verified before extraction/execution. Only a regular root `wrk` entry
+is accepted; paths, links, extra entries, sparse data, and corrupt gzip trailers
+are rejected. The staged executable must report the selected version/platform
+within five seconds. Checksums trust GitHub's release source; they are not signatures.
+
+Installation resolves the running executable, follows standalone symlinks, and
+preserves its permission bits. It requires a user-owned executable and writable
+directory; setuid/setgid and recognized Homebrew/MacPorts/Nix/Snap/system-package
+paths are refused. No sudo, interactive prompt, or alternate PATH installation
+is used. Other package managers may require manual identification by the user.
+
+An independent persistent `.<executable-name>.upgrade.lock` beside the resolved
+binary serializes installers. Do not remove that lock while upgrades may run.
+The updater probes the installed version under the lock to reject a stale running
+process, stages in the same directory, syncs, compares target bytes/identity/mode
+and symlink resolution, atomically renames, and syncs the directory. As with ticket
+updates, the comparison/rename boundary cannot protect against a non-cooperating
+editor or hostile directory changes. Avoid manually replacing the binary during
+an upgrade. Other hard links to the old inode remain unchanged.
+
+Before replacement, failure returns `result: null` and preserves the installed
+binary. Handled failures remove owned stages. After replacement, errors retain
+`changed: true`, `destination`, and `publication: "committed"` with `ok: false`.
+Inspect `<destination> version` before retrying; no automatic rollback is performed.
+Killed processes release the OS lock but may leave `.wrk-upgrade-*` stage files.
+Only remove known abandoned stages when no upgrader is running. A killed process
+or failed stdout may not emit a report, so inspect the installed version first.
+
+| Diagnostic | Action |
+| --- | --- |
+| `NETWORK` | Check connectivity/proxy/TLS settings and retry; incomplete downloads are never installed. |
+| `RATE_LIMIT` | Wait for GitHub's anonymous rate limit to reset, or download/verify manually. |
+| `RELEASE_NOT_FOUND` | No stable release or required download is currently available; check Releases. |
+| `RELEASE_INVALID`, `INTEGRITY`, `CANDIDATE_INVALID` | Stop and inspect the release assets/checksums; the prior installation remains intact. |
+| `INSTALL_METHOD`, `UNSUPPORTED_PLATFORM` | Use your package manager, rebuild development code, or manually install a supported standalone release. |
+| `PERMISSION`, `IO` | Inspect the named operation and installation directory; prefer a user-owned standalone location. |
+| `BUSY`, `CONFLICT` | Wait for other work to finish, inspect the installed version, then rerun that binary. |
+| `DURABILITY_UNCERTAIN`, `CLEANUP_FAILED` | Inspect the publication marker and installed version; resolve directory/stage issues before retrying. |
+
+All operational failures exit 1 and usage errors exit 2. JSON remains a single
+envelope on stdout with no routine stderr messages.
 
 Titles are nonblank single-line strings; supplied spacing is retained. Priorities
 are `low`, `normal`, `high`, `urgent`; statuses are `todo`, `in-progress`, `blocked`,

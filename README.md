@@ -5,6 +5,55 @@ alongside your code and travel through Git branches, commits, and reviews. Agent
 can read the work and edit descriptions directly; the CLI validates metadata and
 relationships before writing.
 
+## Install a release
+
+Download a standalone binary from [GitHub Releases](https://github.com/calebmchenry/wrk/releases).
+Go is not required. macOS (`darwin`) and Linux are supported on `amd64` (Intel/x86-64)
+and `arm64` (Apple Silicon/AArch64). For example, to install v0.1.0 on Apple Silicon:
+
+```sh
+(
+set -eu
+wrk_download_dir="$(mktemp -d)"
+cd "$wrk_download_dir"
+curl -fLO https://github.com/calebmchenry/wrk/releases/download/v0.1.0/wrk_0.1.0_darwin_arm64.tar.gz
+curl -fLO https://github.com/calebmchenry/wrk/releases/download/v0.1.0/wrk_0.1.0_checksums.txt
+awk '$2 == "wrk_0.1.0_darwin_arm64.tar.gz"' wrk_0.1.0_checksums.txt > selected-checksum.txt
+test -s selected-checksum.txt
+shasum -a 256 -c selected-checksum.txt
+tar -xzf wrk_0.1.0_darwin_arm64.tar.gz
+mkdir -p "$HOME/.local/bin"
+install -m 755 wrk "$HOME/.local/bin/wrk"
+"$HOME/.local/bin/wrk" version
+)
+```
+
+Substitute the platform/architecture in both archive filenames and the checksum
+selection. On Linux, `sha256sum -c selected-checksum.txt` also works. Add
+`$HOME/.local/bin` to PATH. The checksum verifies the archive against the trusted
+GitHub release; it is not an independent cryptographic signature.
+
+```sh
+wrk version                    # also: wrk --version
+wrk upgrade --check            # inspect without writing files
+wrk upgrade                    # install a newer stable release
+wrk upgrade --check --json
+```
+
+These commands work outside a project and inside an invalid/newer-format project.
+Only `upgrade` contacts the network. Checks exit 0 whether a newer version exists
+or not; failures exit 1 and invalid arguments exit 2. Upgrades never downgrade.
+An unknown/development version reports availability as unknown; development,
+snapshot, and `go run` builds must be installed manually. A binary predating the
+upgrade command needs one manual installation of an upgrade-capable release.
+
+Self-upgrade supports user-owned standalone binaries in writable directories.
+It follows standalone symlinks and replaces their resolved target. Recognized
+package-manager paths receive guidance to use that manager. It never invokes
+sudo or chooses a different executable from PATH. `wrk update` still edits tickets.
+For connectivity, rate-limit, checksum, permission, and interrupted-upgrade
+troubleshooting, see the [upgrade contract](docs/cli.md#version-and-upgrade).
+
 ## Build and install
 
 Use Go 1.25 or newer on macOS or Linux. The verified development toolchain is

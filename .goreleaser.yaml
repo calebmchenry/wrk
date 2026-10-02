@@ -1,0 +1,48 @@
+version: 2
+project_name: wrk
+
+builds:
+  - id: wrk
+    main: ./cmd/wrk
+    binary: wrk
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - >-
+        -s -w
+        -X wrk/internal/buildinfo.Version={{ .Version }}
+        -X wrk/internal/buildinfo.Commit={{ .FullCommit }}
+        -X wrk/internal/buildinfo.Kind={{ if .IsSnapshot }}snapshot{{ else }}release{{ end }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: 'wrk_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    # An explicit nonmatching glob suppresses GoReleaser's default README/license files.
+    # The updater accepts exactly one regular root entry named wrk.
+    files: ['.release-no-extra-files-*']
+
+checksum:
+  name_template: 'wrk_{{ .Version }}_checksums.txt'
+  algorithm: sha256
+
+snapshot:
+  version_template: '{{ .Version }}-snapshot'
+
+release:
+  github:
+    owner: calebmchenry
+    name: wrk
+  prerelease: auto
+  make_latest: true
+  header: |
+    Standalone wrk binaries for macOS and Linux (amd64 and arm64).
+
+    Verify the archive against the SHA-256 manifest before installation.
+    This release includes `wrk version`, `wrk upgrade --check`, and `wrk upgrade`.
+    Older binaries without `upgrade` need one manual installation.
+    See [installation and upgrade instructions](https://github.com/calebmchenry/wrk#install-a-release).
+
+changelog:
+  sort: asc

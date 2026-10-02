@@ -1,19 +1,27 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
+	"wrk/internal/buildinfo"
 	"wrk/internal/diagnostic"
 	"wrk/internal/project"
 	"wrk/internal/store"
 	"wrk/internal/ticket"
+	"wrk/internal/upgrade"
 )
 
 func Run(args []string, cwd string, in io.Reader, out, errout io.Writer) int {
+	return run(args, cwd, in, out, errout, upgrade.NewClient(), buildinfo.Current())
+}
+
+func run(args []string, cwd string, in io.Reader, out, errout io.Writer, updater *upgrade.Client, info buildinfo.Info) int {
 	r, err := Parse(args)
 	r.JSON = r.JSON || JSONRequested(args)
 	e := Envelope{SchemaVersion: 1, Command: r.Command, Errors: []diagnostic.Diagnostic{}}
@@ -25,6 +33,36 @@ func Run(args []string, cwd string, in io.Reader, out, errout io.Writer) int {
 		e.OK = true
 		e.Result = map[string]any{"usage": Usage}
 		return render(out, errout, r, e, Usage, 0)
+	}
+	if r.Command == "version" {
+		e.OK, e.Result = true, info
+		return render(out, errout, r, e, fmt.Sprintf("wrk %s (%s, commit %s, %s/%s)", info.Version, info.BuildKind, info.Commit, info.GOOS, info.GOARCH), 0)
+	}
+	if r.Command == "upgrade" {
+		var result upgrade.Result
+		if r.Check {
+			result, err = updater.Check(context.Background(), info)
+		} else {
+			result, err = updater.Install(context.Background(), info)
+		}
+		human, code := "", 0
+		e.OK = err == nil
+		if e.OK || result.Changed {
+			e.Result, human = result, result.Human()
+		}
+		if err != nil {
+			code = 1
+			if result.Changed {
+				human += "; publication committed; inspect the installed version before retrying"
+			}
+			name := "IO"
+			var failure *upgrade.Error
+			if errors.As(err, &failure) {
+				name = failure.Code
+			}
+			e.Errors = append(e.Errors, diagnostic.New(name, err.Error(), ""))
+		}
+		return render(out, errout, r, e, human, code)
 	}
 	if cwd == "" {
 		var err error

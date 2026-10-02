@@ -12,6 +12,8 @@ import (
 const Usage = `wrk — local, Git-tracked project tickets
 
 Usage:
+  wrk version | --version
+  wrk upgrade [--check]
   wrk init [directory]
   wrk new "Title" [--body-file path|-] [--parent id] [--priority value]
                   [--label value ... | --no-labels]
@@ -31,6 +33,9 @@ Ready means todo with every dependency done. Blocked stays active, never ready.
 Recursive updates include the root and all descendants, regardless of status;
 only label changes are allowed. Add/remove of the same label conflicts.
 Recursive writes publish one ticket at a time; inspect partial failures before retrying.
+
+Version and upgrade work without a project. Upgrade --check writes no files.
+Upgrade installs the latest stable release for standalone release binaries only.
 
 Every command supports --json and --help. Flags may precede or follow
 positional arguments. Use --flag=value or -- to end option parsing.

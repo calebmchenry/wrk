@@ -1,7 +1,7 @@
 ---
 id: wrk-8d5b1b84
 title: Support upgrading wrk to the latest stable release
-status: todo
+status: in-progress
 priority: normal
 labels:
   - upgrade
@@ -39,3 +39,7 @@ The two release-foundation tickets remain children of [wrk-551ff6c2](wrk-551ff6c
 Release metadata comes from [wrk-bab18df9](wrk-bab18df9.md); packaging comes from [wrk-f28fed55](wrk-f28fed55.md). Upgrade implementation can use local release fixtures before publication. Final delivery also requires [wrk-551ff6c2](wrk-551ff6c2.md). Publication is not a prerequisite for implementing or testing the command, avoiding a circular gate.
 
 2026-10-02: User requested amended work items and an implementation list. This is a planned deliverable; implementation has not started. Prerequisites are recorded in ticket bodies because the current CLI has no dependency mutation command. `list --ready` does not enforce these body links; read them before selection.
+
+## Implementation progress — 2026-10-02
+
+Implementation started for the authorized upgrade batch. Preserve the existing uncommitted metadata work. Use one strict stable version/asset contract, a fixed anonymous HTTPS release source, fixture-driven verification, and same-directory atomic executable replacement. Verify on macOS arm64 and Linux via Docker; record architecture runtime coverage separately. Publication follows implementation and all release gates.

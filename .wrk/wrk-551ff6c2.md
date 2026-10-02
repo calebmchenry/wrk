@@ -58,3 +58,7 @@ Backlog verification: `go run ./cmd/wrk validate` passed with 15 tickets. CLI `s
 - [GoReleaser with GitHub Actions](https://goreleaser.com/customization/ci/actions/)
 - [GoReleaser quick start and snapshot builds](https://goreleaser.com/getting-started/quick-start/)
 - [GoReleaser checksums](https://goreleaser.com/customization/package/checksum/)
+
+## Implementation progress — 2026-10-02
+
+Implementation started for the authorized upgrade batch. Preserve the existing uncommitted metadata work. Use one strict stable version/asset contract, a fixed anonymous HTTPS release source, fixture-driven verification, and same-directory atomic executable replacement. Verify on macOS arm64 and Linux via Docker; record architecture runtime coverage separately. Publication follows implementation and all release gates.

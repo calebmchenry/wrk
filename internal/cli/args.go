@@ -8,14 +8,15 @@ import (
 )
 
 type Request struct {
-	Command                                          string
-	JSON, Help, All, Ready, NoLabels, Recursive      bool
-	Args                                             []string
-	Title, Status, BodyFile, Parent, Priority, Under *string
-	Labels, AddLabels, RemoveLabels                  []string
+	Command                                            string
+	JSON, Help, All, Ready, NoLabels, Recursive, Check bool
+	Args                                               []string
+	Title, Status, BodyFile, Parent, Priority, Under   *string
+	Labels, AddLabels, RemoveLabels                    []string
 }
 
 var commandFlags = map[string]map[string]bool{
+	"version": {}, "upgrade": {"check": false},
 	"init": {}, "new": {"body-file": true, "parent": true, "priority": true, "label": true, "no-labels": false},
 	"list": {"all": false, "ready": false, "label": true, "under": true}, "show": {}, "update": {"title": true, "status": true, "priority": true, "label": true, "no-labels": false, "add-label": true, "remove-label": true, "recursive": false}, "validate": {}, "help": {},
 }
@@ -36,7 +37,9 @@ func Parse(args []string) (Request, error) {
 				name = "help"
 			}
 			takesValue := false
-			if name != "json" && name != "help" {
+			if name == "version" && r.Command == "" {
+				r.Command = "version"
+			} else if name != "json" && name != "help" {
 				var ok bool
 				takesValue, ok = commandFlags[r.Command][name]
 				if !ok {
@@ -59,6 +62,8 @@ func Parse(args []string) (Request, error) {
 				return r, fmt.Errorf("--%s does not take a value", name)
 			}
 			switch name {
+			case "check":
+				r.Check = true
 			case "json":
 				r.JSON = true
 			case "help":

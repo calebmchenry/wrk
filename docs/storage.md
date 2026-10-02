@@ -2,7 +2,9 @@
 
 Supported environments are macOS and Linux local filesystems with advisory flock,
 hard links, atomic same-directory rename, and directory sync. Unsupported primitives
-fail without a weaker fallback. Runtime use requires no network.
+fail without a weaker fallback. Ticket operations require no network. Explicit
+`upgrade` commands use HTTPS and a separate installation lock; see the
+[upgrade contract](cli.md#version-and-upgrade).
 
 Writers hold the persistent `.wrk/.lock` inode exclusively and nonblocking. BUSY
 means another writer holds it. The file is never removed on release; process exit
