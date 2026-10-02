@@ -35,3 +35,25 @@ Implementation started for the authorized upgrade batch. Preserve the existing u
 ### Implemented and verified
 
 Implemented verified self-upgrade for standalone stable release binaries. Uses resolved target, independent persistent advisory lock, under-lock installed-version verification, bounded SHA-256 downloads, strict root-only archive extraction, staged version/platform probe, permission preservation, target/identity/content recheck, atomic rename, and directory sync. Development/package-manager guidance and pre/post-publication output are documented. Failure tests cover integrity/extraction/probe/network/permissions, symlinks, stale processes, concurrent writers/target replacement, no-ops, cleanup, and directory-sync uncertainty. Real subprocess fixture tests pass on macOS arm64 and Linux arm64, including concurrent invocations, killed downloads, old-binary re-execution, and committed error envelopes.
+
+### Completion evidence — 2026-10-02
+
+Completed this item as part of the seven-ticket upgrade batch. Source commit
+`14242c8c700c7af77cd0d0c9a1c48f892d6ee7c7` is published as stable
+[v0.1.0](https://github.com/calebmchenry/wrk/releases/tag/v0.1.0).
+[Source verification](https://github.com/calebmchenry/wrk/actions/runs/37075705677)
+and [tagged release gates](https://github.com/calebmchenry/wrk/actions/runs/37076069709)
+passed on native macOS/Linux amd64/arm64 runners, including the controlled
+two-version executable replacement tests. The exact four packaged release assets
+were checksum/metadata verified and natively executed on all four platforms before
+publication. Freshly downloaded assets passed checksum/contract verification;
+published macOS arm64 and Linux arm64 binaries reported the expected version/commit,
+queried live GitHub successfully, and returned an unchanged upgrade no-op. No
+developer installation was replaced and no artificial stable test releases were
+published. Repository visibility is unchanged.
+
+See [durable verification evidence](../docs/release-verification.md),
+[maintainer procedure](../docs/releases.md), and the
+[CLI contract](../docs/cli.md#version-and-upgrade). Local formatting, uncached tests,
+race tests, vet, build, actionlint v1.7.12, GoReleaser v2.18.2 validation/snapshot
+packaging, and project validation passed. Remaining work for this item: none.

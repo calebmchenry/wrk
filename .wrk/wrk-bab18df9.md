@@ -32,3 +32,25 @@ Implementation started for the authorized upgrade batch. Preserve the existing u
 ### Implemented and verified
 
 Implemented internal/buildinfo and project-independent version/--version in human and JSON output. Stable tags are exactly vX.Y.Z; stable metadata uses X.Y.Z, full commit, and release kind. Development and snapshot builds remain identifiable. All four archive names and manifest contract are shared with the updater and GoReleaser. Tests cover numeric ordering, invalid tags, all platform names, injected release builds, default development builds, parser errors, and invalid/newer-format projects. macOS and Linux test/race/vet gates passed; snapshot archive metadata and native execution verified.
+
+### Completion evidence — 2026-10-02
+
+Completed this item as part of the seven-ticket upgrade batch. Source commit
+`14242c8c700c7af77cd0d0c9a1c48f892d6ee7c7` is published as stable
+[v0.1.0](https://github.com/calebmchenry/wrk/releases/tag/v0.1.0).
+[Source verification](https://github.com/calebmchenry/wrk/actions/runs/37075705677)
+and [tagged release gates](https://github.com/calebmchenry/wrk/actions/runs/37076069709)
+passed on native macOS/Linux amd64/arm64 runners, including the controlled
+two-version executable replacement tests. The exact four packaged release assets
+were checksum/metadata verified and natively executed on all four platforms before
+publication. Freshly downloaded assets passed checksum/contract verification;
+published macOS arm64 and Linux arm64 binaries reported the expected version/commit,
+queried live GitHub successfully, and returned an unchanged upgrade no-op. No
+developer installation was replaced and no artificial stable test releases were
+published. Repository visibility is unchanged.
+
+See [durable verification evidence](../docs/release-verification.md),
+[maintainer procedure](../docs/releases.md), and the
+[CLI contract](../docs/cli.md#version-and-upgrade). Local formatting, uncached tests,
+race tests, vet, build, actionlint v1.7.12, GoReleaser v2.18.2 validation/snapshot
+packaging, and project validation passed. Remaining work for this item: none.

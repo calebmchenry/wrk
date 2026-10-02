@@ -34,3 +34,25 @@ Implementation started for the authorized upgrade batch. Preserve the existing u
 ### Implemented and verified
 
 Implemented fixed-source HTTPS stable discovery and upgrade --check before project discovery. Enforced request deadlines, bounded metadata/download sizes, HTTPS redirects, stable release/tag validation, exact asset cardinality, and same repository/tag/filename URLs. Unknown builds report available:null with guidance. Checks make no filesystem changes; ordinary commands stay offline. Fixture tests cover version ordering/no downgrade, unknown metadata, unsupported platforms, missing/duplicate/invalid assets, HTTP errors/rate limits/offline/timeout, malformed/oversized responses, JSON/help, and invalid projects. macOS and Linux test/race/vet checks passed.
+
+### Completion evidence — 2026-10-02
+
+Completed this item as part of the seven-ticket upgrade batch. Source commit
+`14242c8c700c7af77cd0d0c9a1c48f892d6ee7c7` is published as stable
+[v0.1.0](https://github.com/calebmchenry/wrk/releases/tag/v0.1.0).
+[Source verification](https://github.com/calebmchenry/wrk/actions/runs/37075705677)
+and [tagged release gates](https://github.com/calebmchenry/wrk/actions/runs/37076069709)
+passed on native macOS/Linux amd64/arm64 runners, including the controlled
+two-version executable replacement tests. The exact four packaged release assets
+were checksum/metadata verified and natively executed on all four platforms before
+publication. Freshly downloaded assets passed checksum/contract verification;
+published macOS arm64 and Linux arm64 binaries reported the expected version/commit,
+queried live GitHub successfully, and returned an unchanged upgrade no-op. No
+developer installation was replaced and no artificial stable test releases were
+published. Repository visibility is unchanged.
+
+See [durable verification evidence](../docs/release-verification.md),
+[maintainer procedure](../docs/releases.md), and the
+[CLI contract](../docs/cli.md#version-and-upgrade). Local formatting, uncached tests,
+race tests, vet, build, actionlint v1.7.12, GoReleaser v2.18.2 validation/snapshot
+packaging, and project validation passed. Remaining work for this item: none.

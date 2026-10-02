@@ -57,6 +57,8 @@ Snapshot packaging may use a dirty tree; it is inspection evidence, not publisha
 release evidence. The verifier checks all archive names, checksums, entries, platform
 and build metadata, then executes the native asset. Cross-compilation/metadata
 inspection does not prove runtime correctness on another platform.
+When verifying downloaded published artifacts with this script, check out their
+release tag first: the provenance check compares each binary's commit to HEAD.
 
 The reusable `Verify` workflow runs formatting, tests, race tests, vet, project
 validation, and executable smoke tests on Linux amd64/arm64 and macOS amd64/arm64.

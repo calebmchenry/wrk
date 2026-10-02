@@ -9,6 +9,7 @@ Use this project's own CLI to track work in [`.wrk/`](../.wrk/). Follow the [dai
 - [CLI commands and output contract](cli.md)
 - [Storage, concurrency, and recovery](storage.md)
 - [Release packaging, publication, and upgrade verification](releases.md)
+- [v0.1.0 platform and upgrade verification evidence](release-verification.md)
 - [Scoped agent burn loop and durable handoffs](burns.md)
 - [Development checks and integration-test cache behavior](../README.md#developing-wrk-with-wrk)
 

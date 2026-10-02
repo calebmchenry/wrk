@@ -1,7 +1,7 @@
 ---
 id: wrk-551ff6c2
 title: Publish versioned wrk binaries on GitHub Releases
-status: in-progress
+status: done
 priority: normal
 labels:
   - upgrade
@@ -19,13 +19,13 @@ Add .goreleaser.yaml, a CI workflow, a tag-triggered release workflow, version r
 ## Acceptance criteria
 
 - [x] Publish the initial source commit to calebmchenry/wrk, preserving its existing visibility, and configure main to track origin/main.
-- [ ] Complete [version reporting and the shared release asset contract](wrk-bab18df9.md), including project-independent version commands and identifiable release/development builds.
-- [ ] Complete [automated release packaging](wrk-f28fed55.md): formatting, test, race, vet, and project validation gates; macOS/Linux archives for amd64/arm64; SHA-256 checksums; and version/commit metadata.
-- [ ] Verify local snapshot packaging and smoke-test installation/execution on supported platforms; distinguish cross-compilation from runtime verification.
-- [ ] Publish the first versioned GitHub Release with downloadable assets and release notes.
-- [ ] Coordinate the first upgrade-capable stable release with [the upgrade deliverable](wrk-8d5b1b84.md) after its command implementation and controlled end-to-end verification are complete. Prefer including the command in the first release; if a release predates it, document the one-time manual bootstrap installation.
-- [ ] Verify published asset names/checksums against the shared contract, download/install a published binary, confirm its version, and smoke-test its live upgrade check without replacing a developer's working installation.
-- [ ] Document download, checksum verification, installation, and maintainer release steps; link the maintainer documentation from docs/index.md.
+- [x] Complete [version reporting and the shared release asset contract](wrk-bab18df9.md), including project-independent version commands and identifiable release/development builds.
+- [x] Complete [automated release packaging](wrk-f28fed55.md): formatting, test, race, vet, and project validation gates; macOS/Linux archives for amd64/arm64; SHA-256 checksums; and version/commit metadata.
+- [x] Verify local snapshot packaging and smoke-test installation/execution on supported platforms; distinguish cross-compilation from runtime verification.
+- [x] Publish the first versioned GitHub Release with downloadable assets and release notes.
+- [x] Coordinate the first upgrade-capable stable release with [the upgrade deliverable](wrk-8d5b1b84.md) after its command implementation and controlled end-to-end verification are complete. Prefer including the command in the first release; if a release predates it, document the one-time manual bootstrap installation.
+- [x] Verify published asset names/checksums against the shared contract, download/install a published binary, confirm its version, and smoke-test its live upgrade check without replacing a developer's working installation.
+- [x] Document download, checksum verification, installation, and maintainer release steps; link the maintainer documentation from docs/index.md.
 
 ## Findings and handoff
 
@@ -62,3 +62,25 @@ Backlog verification: `go run ./cmd/wrk validate` passed with 15 tickets. CLI `s
 ## Implementation progress — 2026-10-02
 
 Implementation started for the authorized upgrade batch. Preserve the existing uncommitted metadata work. Use one strict stable version/asset contract, a fixed anonymous HTTPS release source, fixture-driven verification, and same-directory atomic executable replacement. Verify on macOS arm64 and Linux via Docker; record architecture runtime coverage separately. Publication follows implementation and all release gates.
+
+### Completion evidence — 2026-10-02
+
+Completed this item as part of the seven-ticket upgrade batch. Source commit
+`14242c8c700c7af77cd0d0c9a1c48f892d6ee7c7` is published as stable
+[v0.1.0](https://github.com/calebmchenry/wrk/releases/tag/v0.1.0).
+[Source verification](https://github.com/calebmchenry/wrk/actions/runs/37075705677)
+and [tagged release gates](https://github.com/calebmchenry/wrk/actions/runs/37076069709)
+passed on native macOS/Linux amd64/arm64 runners, including the controlled
+two-version executable replacement tests. The exact four packaged release assets
+were checksum/metadata verified and natively executed on all four platforms before
+publication. Freshly downloaded assets passed checksum/contract verification;
+published macOS arm64 and Linux arm64 binaries reported the expected version/commit,
+queried live GitHub successfully, and returned an unchanged upgrade no-op. No
+developer installation was replaced and no artificial stable test releases were
+published. Repository visibility is unchanged.
+
+See [durable verification evidence](../docs/release-verification.md),
+[maintainer procedure](../docs/releases.md), and the
+[CLI contract](../docs/cli.md#version-and-upgrade). Local formatting, uncached tests,
+race tests, vet, build, actionlint v1.7.12, GoReleaser v2.18.2 validation/snapshot
+packaging, and project validation passed. Remaining work for this item: none.
