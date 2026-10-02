@@ -17,7 +17,7 @@ Add .goreleaser.yaml, a CI workflow, a tag-triggered release workflow, version r
 
 ## Acceptance criteria
 
-- [ ] Establish the GitHub owner/repository and intended visibility, make the initial source commit, and configure/push the remote.
+- [x] Publish the initial source commit to calebmchenry/wrk, preserving its existing visibility, and configure main to track origin/main.
 - [ ] Add automated formatting, test, race, vet, and project validation checks on supported platforms; gate releases on passing checks.
 - [ ] Produce macOS and Linux archives for amd64 and arm64, with checksums and identifiable version/commit metadata.
 - [ ] Verify local snapshot packaging and smoke-test installation/execution on supported platforms; distinguish cross-compilation from runtime verification.
@@ -26,11 +26,11 @@ Add .goreleaser.yaml, a CI workflow, a tag-triggered release workflow, version r
 
 ## Findings and handoff
 
-2026-10-02: Reviewed docs/index.md, README.md, go.mod, platform constraints, existing tickets, and official GitHub/GoReleaser documentation. This checkout has no Git commits or remote, no .github workflows, and no GoReleaser configuration. The current module path is wrk. A canonical github.com/<owner>/<repo> module path plus updated internal imports is needed if we also offer remote go install; it is not required for downloadable binaries. Prior execution evidence covers macOS arm64 and Linux arm64; amd64 runtime verification is still outstanding.
+2026-10-02: Reviewed docs/index.md, README.md, go.mod, platform constraints, existing tickets, and official GitHub/GoReleaser documentation. At initial review, this checkout had no Git commits or remote. There are still no .github workflows or GoReleaser configuration. The current module path is wrk. A canonical github.com/<owner>/<repo> module path plus updated internal imports is needed if we also offer remote go install; it is not required for downloadable binaries. Prior execution evidence covers macOS arm64 and Linux arm64; amd64 runtime verification is still outstanding.
 
-The user authorized creating the initial commit and pushing main to the existing repository at https://github.com/calebmchenry/wrk.git. The origin remote is configured and currently has no branches. Preserve the existing repository visibility. Initial source publication is in progress; release automation and binary publication remain future work.
+The user authorized creating the initial commit and pushing main to the existing repository at https://github.com/calebmchenry/wrk.git. Initial commit d43b393 (Initial commit) was pushed successfully; main now tracks origin/main. Repository visibility was unchanged. Release automation and binary publication remain future work, so this ticket remains in progress.
 
-Pre-commit verification: go test ./... passed, and go run ./cmd/wrk validate passed with 8 tickets. Runtime locks, build output, and sprint logs are covered by the existing ignore rules. Record the push result here after publishing the initial commit.
+Verification: go test ./... and git diff --cached --check passed, and go run ./cmd/wrk validate passed with 8 tickets. Runtime locks, build output, and sprint logs are covered by the existing ignore rules.
 
 ## References
 
