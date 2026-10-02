@@ -10,7 +10,7 @@ Each ticket is one UTF-8 Markdown file at `.wrk/<id>.md`. YAML frontmatter holds
 - CLI writers are serialized with a persistent lock. Updates compare all validation inputs immediately before publication and reject detected changes. Direct body/config edits and Git operations must happen outside CLI mutations: an editor save between the final comparison and replacement can still be lost. See [the storage boundary](storage.md).
 - These are repository conventions, not filesystem access controls. The `wrk validate` command will check repository integrity, including changes introduced by manual edits or Git merges; it cannot prove which tool made an edit.
 
-This project's initial files were migrated before the CLI existed. The CLI now creates tickets (including parent, priority, and label overrides) and updates title/status. General relationship, priority/label, and custom-field updates remain deferred; do not change those metadata fields manually.
+This project's initial files were migrated before the CLI existed. The CLI now creates tickets (including parent, priority, and label overrides) and updates title/status and adds/removes labels (including recursive labeling). General relationship, priority, replacement/clear-label, and custom-field updates remain deferred; do not change those metadata fields manually.
 
 The body is every byte after the closing delimiter line ending; LF and CRLF are accepted, including an empty body and no terminal newline. Updates preserve exact body bytes and unrelated YAML values, including custom tags and aliases. Frontmatter formatting/comments are not byte guarantees. If preservation cannot be established, an update fails unchanged with `PRESERVATION_UNSUPPORTED`; reads remain available for otherwise valid files.
 
@@ -60,11 +60,11 @@ The references in this example are illustrative. Actual relationships must point
 | --- | --- | --- |
 | `id` | Yes | Stable identity, matching the filename without `.md`. |
 | `title` | Yes | Nonempty, single-line summary. |
-| `status` | Yes | `todo`, `in-progress`, `done`, or `canceled`. |
+| `status` | Yes | `todo`, `in-progress`, `blocked`, `done`, or `canceled`. |
 | `parent` | No | ID of the single ticket this work belongs to. Omit for a root ticket. |
 | `depends_on` | No | List of prerequisite ticket IDs; absent means no dependencies. |
 | `priority` | No | `low`, `normal`, `high`, or `urgent`; absent means `normal`. |
-| `labels` | No | List of nonempty strings; absent means no labels. |
+| `labels` | No | List of nonempty strings; duplicates are allowed; absent means no labels. |
 | `fields` | No | Map of project-specific values; absent means no custom values. |
 
 Use only the built-in fields at the top level; custom data belongs under `fields`. Duplicate YAML keys are invalid. Empty relationship lists may be omitted. Clearing a parent removes the field.
@@ -83,7 +83,11 @@ A ticket can have one parent and any number of children. Store only `parent` on 
 
 Dependencies express prerequisites independently of parenting. Parents and dependencies must exist in the same project. Reject self-references, duplicate dependencies, cycles in the parent graph, and cycles in the dependency graph. Check these graphs separately: a parent may legitimately depend on its children.
 
-An unfinished dependency is a blocker. Only `done` satisfies a dependency; `canceled` does not. Show dependency blockers alongside status without introducing a `blocked` status. Explain blockers that are not tickets in the body. In the initial workflow, blockers are reported but do not prohibit an explicit status change.
+An unfinished dependency is a blocker. Only `done` satisfies a dependency; `canceled` and `blocked` do not. Dependency blockers are derived separately from status and do not prohibit an explicit status change. Ready means `todo` with every dependency `done`.
+
+Use manual `blocked` status for work that cannot proceed, and record the reason, exact unblocking condition, and resume notes in the body. Blocked tickets stay in active lists but are excluded from ready lists, even with no unfinished dependencies. Unblocking requires an explicit status update; finishing dependencies never clears it. The status vocabulary is extended within version 1: older clients that reject `blocked` may refuse all project data commands. Upgrade all clients before using the new value; existing tickets need no migration.
+
+Labels select arbitrary batches without changing parent relationships. Recursive labeling includes the root and all descendants at the time of the command, regardless of status, and follows parent edges rather than dependencies. It is not inheritance; pass explicit labels when creating later subtasks. `list --under` lists descendants only, excluding the root. See [scoped agent burns](burns.md) and the [CLI contract](cli.md#scopes-and-label-mutations).
 
 Status changes are explicit. Completing children does not close a parent, completing a prerequisite does not start dependent tickets, and cancellation does not cascade. Reopening a completed ticket is allowed. Use `canceled` to retire work while keeping its history and references.
 

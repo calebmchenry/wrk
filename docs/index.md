@@ -8,10 +8,15 @@ Use this project's own CLI to track work in [`.wrk/`](../.wrk/). Follow the [dai
 - [Project configuration](configuration.md)
 - [CLI commands and output contract](cli.md)
 - [Storage, concurrency, and recovery](storage.md)
+- [Scoped agent burn loop and durable handoffs](burns.md)
+- [Development checks and integration-test cache behavior](../README.md#developing-wrk-with-wrk)
 
 Agents may edit ticket bodies directly. Creation and changes to frontmatter, relationships, or status go through the CLI. Project configuration may be edited directly.
 
-The CLI supports initialization, creation with parent/priority/label overrides, list/show/validate, and title/status updates. Other metadata updates remain deferred; do not edit them manually. Direct body/config edits and Git operations must occur outside CLI mutations; see the accepted [external-editor boundary](storage.md).
+The CLI supports initialization, creation with parent/priority/label overrides,
+list/show/validate, title/status updates (including blocked), and single-ticket or
+recursive label add/remove operations. Lists can filter labels and descendants.
+Other metadata updates remain deferred; do not edit them manually. Direct body/config edits and Git operations must occur outside CLI mutations; see the accepted [external-editor boundary](storage.md).
 
 ## Daily workflow
 
@@ -30,7 +35,8 @@ is only needed for a new project.
    ```
 
    `list` includes work already in progress and blocked tickets. `--ready` only
-   shows `todo` tickets with completed dependencies; use `--all` to find closed work.
+   shows `todo` tickets with completed dependencies. Manual blocked status never
+   clears automatically. Use `--all` to find closed work.
 
 2. Read the relevant ticket with `go run ./cmd/wrk show <id>`. Reuse it if it covers
    the task. Otherwise create a ticket and use the ID printed by the CLI:
@@ -78,6 +84,12 @@ for the initial milestones and deferred scope.
 - [wrk-1a09af55: Support parent and dependency updates](../.wrk/wrk-1a09af55.md)
 - [wrk-e146d171: Support priority and label updates](../.wrk/wrk-e146d171.md)
 - [wrk-c12ff4c6: Support custom-field creation and updates](../.wrk/wrk-c12ff4c6.md)
+- [wrk-d965ba66: Scoped AI task burns](../.wrk/wrk-d965ba66.md) — labels, descendant scopes, blocked status, and the burn workflow
+
+Release and upgrade work:
+
+- [wrk-551ff6c2: Publish versioned binaries](../.wrk/wrk-551ff6c2.md) — version metadata, platform packaging, and release publication.
+- [wrk-8d5b1b84: Upgrade to the latest stable release](../.wrk/wrk-8d5b1b84.md) — check, install, and verify/document the upgrade path. List both deliverables and their children with `go run ./cmd/wrk list --all --label upgrade`; implementation prerequisites are recorded in ticket bodies until dependency mutation is supported.
 
 ## Sprint plans
 

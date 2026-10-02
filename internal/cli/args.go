@@ -3,19 +3,21 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
+	"wrk/internal/ticket"
 )
 
 type Request struct {
-	Command                                   string
-	JSON, Help, All, Ready, NoLabels          bool
-	Args                                      []string
-	Title, Status, BodyFile, Parent, Priority *string
-	Labels                                    []string
+	Command                                          string
+	JSON, Help, All, Ready, NoLabels, Recursive      bool
+	Args                                             []string
+	Title, Status, BodyFile, Parent, Priority, Under *string
+	Labels, AddLabels, RemoveLabels                  []string
 }
 
 var commandFlags = map[string]map[string]bool{
 	"init": {}, "new": {"body-file": true, "parent": true, "priority": true, "label": true, "no-labels": false},
-	"list": {"all": false, "ready": false}, "show": {}, "update": {"title": true, "status": true}, "validate": {}, "help": {},
+	"list": {"all": false, "ready": false, "label": true, "under": true}, "show": {}, "update": {"title": true, "status": true, "add-label": true, "remove-label": true, "recursive": false}, "validate": {}, "help": {},
 }
 
 func Parse(args []string) (Request, error) {
@@ -41,7 +43,7 @@ func Parse(args []string) (Request, error) {
 					return r, fmt.Errorf("unknown flag %s for %s", a, r.Command)
 				}
 			}
-			if name != "label" && seen[name] {
+			if name != "label" && name != "add-label" && name != "remove-label" && seen[name] {
 				return r, fmt.Errorf("flag --%s may only be supplied once", name)
 			}
 			seen[name] = true
@@ -67,6 +69,14 @@ func Parse(args []string) (Request, error) {
 				r.Ready = true
 			case "no-labels":
 				r.NoLabels = true
+			case "recursive":
+				r.Recursive = true
+			case "under":
+				r.Under = &value
+			case "add-label":
+				r.AddLabels = append(r.AddLabels, value)
+			case "remove-label":
+				r.RemoveLabels = append(r.RemoveLabels, value)
 			case "label":
 				r.Labels = append(r.Labels, value)
 			case "title":
@@ -123,8 +133,20 @@ func Parse(args []string) (Request, error) {
 	if len(r.Args) < min || len(r.Args) > max {
 		return r, fmt.Errorf("%s expects %d to %d positional arguments", r.Command, min, max)
 	}
-	if r.Command == "update" && r.Title == nil && r.Status == nil {
-		return r, fmt.Errorf("update requires --title or --status")
+	if r.Command == "update" {
+		if err := (ticket.Changes{Title: r.Title, Status: r.Status, AddLabels: r.AddLabels, RemoveLabels: r.RemoveLabels}).Validate(); err != nil {
+			return r, err
+		}
+		if r.Recursive && (r.Title != nil || r.Status != nil) {
+			return r, fmt.Errorf("--recursive permits only label changes")
+		}
+	}
+	if r.Command == "list" {
+		for _, label := range r.Labels {
+			if label == "" || !utf8.ValidString(label) {
+				return r, fmt.Errorf("--label requires a nonempty UTF-8 string")
+			}
+		}
 	}
 	return r, nil
 }

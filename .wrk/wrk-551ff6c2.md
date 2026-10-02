@@ -3,11 +3,12 @@ id: wrk-551ff6c2
 title: Publish versioned wrk binaries on GitHub Releases
 status: in-progress
 priority: normal
-labels: []
+labels:
+  - upgrade
 ---
 ## Outcome
 
-Users can download a versioned wrk executable from GitHub Releases and run it without installing Go.
+Users can download a versioned wrk executable from GitHub Releases and run it without installing Go. Stable releases expose the version metadata, platform archives, and checksums needed by [wrk upgrade](wrk-8d5b1b84.md).
 
 ## Proposed approach
 
@@ -18,10 +19,12 @@ Add .goreleaser.yaml, a CI workflow, a tag-triggered release workflow, version r
 ## Acceptance criteria
 
 - [x] Publish the initial source commit to calebmchenry/wrk, preserving its existing visibility, and configure main to track origin/main.
-- [ ] Add automated formatting, test, race, vet, and project validation checks on supported platforms; gate releases on passing checks.
-- [ ] Produce macOS and Linux archives for amd64 and arm64, with checksums and identifiable version/commit metadata.
+- [ ] Complete [version reporting and the shared release asset contract](wrk-bab18df9.md), including project-independent version commands and identifiable release/development builds.
+- [ ] Complete [automated release packaging](wrk-f28fed55.md): formatting, test, race, vet, and project validation gates; macOS/Linux archives for amd64/arm64; SHA-256 checksums; and version/commit metadata.
 - [ ] Verify local snapshot packaging and smoke-test installation/execution on supported platforms; distinguish cross-compilation from runtime verification.
 - [ ] Publish the first versioned GitHub Release with downloadable assets and release notes.
+- [ ] Coordinate the first upgrade-capable stable release with [the upgrade deliverable](wrk-8d5b1b84.md) after its command implementation and controlled end-to-end verification are complete. Prefer including the command in the first release; if a release predates it, document the one-time manual bootstrap installation.
+- [ ] Verify published asset names/checksums against the shared contract, download/install a published binary, confirm its version, and smoke-test its live upgrade check without replacing a developer's working installation.
 - [ ] Document download, checksum verification, installation, and maintainer release steps; link the maintainer documentation from docs/index.md.
 
 ## Findings and handoff
@@ -31,6 +34,23 @@ Add .goreleaser.yaml, a CI workflow, a tag-triggered release workflow, version r
 The user authorized creating the initial commit and pushing main to the existing repository at https://github.com/calebmchenry/wrk.git. Initial commit d43b393 (Initial commit) was pushed successfully; main now tracks origin/main. Repository visibility was unchanged. Release automation and binary publication remain future work, so this ticket remains in progress.
 
 Verification: go test ./... and git diff --cached --check passed, and go run ./cmd/wrk validate passed with 8 tickets. Runtime locks, build output, and sprint logs are covered by the existing ignore rules.
+
+## Implementation work items and release coordination
+
+2026-10-02: The user requested amendment of the related work items and a complete implementation list. The earlier feasibility notes are now captured as actionable tickets. `gh repo view calebmchenry/wrk --json isPrivate,url,latestRelease` confirmed a public repository with no latest release. Preserve that visibility; anonymous access is sufficient for the initial updater scope.
+
+This release ticket retains ownership of publication, live installation evidence, and release documentation. Its implementation children are:
+
+1. [wrk-bab18df9: Version reporting and release asset contract](wrk-bab18df9.md).
+2. [wrk-f28fed55: Verified multi-platform release packaging](wrk-f28fed55.md), after the contract is defined.
+
+The companion [wrk-8d5b1b84: Upgrade deliverable](wrk-8d5b1b84.md) owns [stable release checking](wrk-2c22eb33.md), [safe installation](wrk-f1f845bd.md), and [end-to-end verification and upgrade documentation](wrk-af501027.md). Packaging and upgrade implementation may proceed after the common contract exists. Controlled tests use release fixtures before publication; no live release is needed to implement the commands. Publish the first upgrade-capable release after these checks pass, then record live download/install/version/check evidence here. Do not create artificial stable releases just for a two-version test.
+
+All seven related tickets carry the `upgrade` label: `go run ./cmd/wrk list --all --label upgrade`. Prerequisites are explicit in bodies because the current CLI cannot create/update dependency edges; do not infer ordering from `list --ready` alone or hand-edit frontmatter. The existing [relationship update ticket](wrk-1a09af55.md) tracks that CLI gap and is not a prerequisite for implementing upgrades.
+
+Remaining work is implementation of the listed tickets and the final release steps. This backlog amendment does not mark any implementation complete; the release parent remains in progress. The local module path remains `wrk`; remote Go-module installation, Homebrew distribution, Windows, private release authentication, and prerelease/downgrade channels are outside this batch.
+
+Backlog verification: `go run ./cmd/wrk validate` passed with 15 tickets. CLI `show --json` confirmed the seven batch members' statuses, parent relationships, and `upgrade` labels; all local links in their bodies resolve. `git diff --check` passed for the amended tracked files. No feature implementation or publication was performed in this refinement.
 
 ## References
 

@@ -15,11 +15,19 @@ Usage:
   wrk init [directory]
   wrk new "Title" [--body-file path|-] [--parent id] [--priority value]
                   [--label value ... | --no-labels]
-  wrk list [--all | --ready]
+  wrk list [--all | --ready] [--label value ...] [--under id]
   wrk show <id>
-  wrk update <id> [--title "Title"] [--status todo|in-progress|done|canceled]
+  wrk update <id> [--title "Title"] [--status todo|in-progress|blocked|done|canceled]
+                  [--add-label value ...] [--remove-label value ...]
+                  [--recursive]
   wrk validate
   wrk help [command]
+
+Label filters require ALL labels; --under excludes the root. Filters intersect.
+Ready means todo with every dependency done. Blocked stays active, never ready.
+Recursive updates include the root and all descendants, regardless of status;
+only label changes are allowed. Add/remove of the same label conflicts.
+Recursive writes publish one ticket at a time; inspect partial failures before retrying.
 
 Every command supports --json and --help. Flags may precede or follow
 positional arguments. Use --flag=value or -- to end option parsing.

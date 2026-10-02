@@ -29,7 +29,9 @@ func TestInterruptedProcess(t *testing.T) {
 		}
 		return nil
 	}}
-	if os.Getenv("WRK_TEST_INTERRUPT_NEW") == "true" {
+	if os.Getenv("WRK_TEST_INTERRUPT_RECURSIVE") == "true" {
+		updateWithOptions(root, testID, burnOptions(), h)
+	} else if os.Getenv("WRK_TEST_INTERRUPT_NEW") == "true" {
 		create(root, CreateOptions{Title: "Created"}, bytes.NewReader([]byte{0, 0, 0, 1}), h)
 	} else {
 		update(root, testID, nil, &status, h)
@@ -129,5 +131,67 @@ func TestUmaskAndSpecialModes(t *testing.T) {
 	info, _ := os.Stat(path)
 	if info.Mode().Perm() != 0400 {
 		t.Fatal("widened read-only mode")
+	}
+}
+
+func TestInterruptedRecursiveBatch(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, point := range []string{"before_compare", "after_publish"} {
+		t.Run(point, func(t *testing.T) {
+			root := recursiveProject(t)
+			before := project.Load(root)
+			cmd := exec.Command(exe, "-test.run=^TestInterruptedProcess$")
+			cmd.Env = append(os.Environ(), "WRK_TEST_INTERRUPT_ROOT="+root, "WRK_TEST_INTERRUPT_POINT="+point, "WRK_TEST_INTERRUPT_RECURSIVE=true")
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			stdin, err := cmd.StdinPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stdin.Close()
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { cmd.Process.Kill() })
+			scan := bufio.NewScanner(stdout)
+			if !scan.Scan() || scan.Text() != "checkpoint" {
+				t.Fatal("no checkpoint")
+			}
+			cmd.Process.Kill()
+			cmd.Wait()
+			after := project.Load(root)
+			if len(after.Diagnostics) > 0 {
+				t.Fatal(after.Diagnostics)
+			}
+			changed := 0
+			for path, file := range before.Files {
+				if !bytes.Equal(file.Data, after.Files[path].Data) {
+					changed++
+				}
+			}
+			want := 0
+			if point == "after_publish" {
+				want = 1
+			}
+			if changed != want {
+				t.Fatalf("changed %d want %d", changed, want)
+			}
+			stages, _ := filepath.Glob(filepath.Join(root, ".wrk/.wrk-stage-*"))
+			if len(stages) != 5-want {
+				t.Fatal(stages)
+			}
+			retry := UpdateWithOptions(root, testID, burnOptions())
+			if len(retry.Diagnostics) > 0 || !retry.Changed {
+				t.Fatal(retry.Diagnostics)
+			}
+			if point == "after_publish" && retry.Updates[0].Publication != "unchanged" {
+				t.Fatal("retry rewrote committed file")
+			}
+		})
 	}
 }

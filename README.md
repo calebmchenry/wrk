@@ -53,7 +53,7 @@ wrk validate
 
 Between CLI updates, edit the Markdown body in `.wrk/<id>.md` directly. Everything
 through the closing `---` is metadata and must be changed through supported CLI
-commands. Title/status updates retain the body byte-for-byte, including whitespace
+commands. Metadata updates retain the body byte-for-byte, including whitespace
 and missing final newlines.
 
 ```sh
@@ -63,20 +63,66 @@ wrk list --json
 ```
 
 Use `new --parent <id>` for children. Creation supports `--priority`, repeated
-`--label` (replaces configured labels), and `--no-labels`. Updates currently support
-only `--title` and `--status`. General parent/dependency, priority/label, and custom
-field updates are tracked as follow-up work.
+`--label` (replaces configured labels), and `--no-labels`. Updates support
+`--title`, `--status`, repeated `--add-label`, and repeated `--remove-label`. General parent/dependency, priority, label replacement/clear,
+and custom field updates remain follow-up work.
 
 Bare `wrk` prints help. Flags may come before or after positional arguments;
 `--flag=value` and `--` are supported. Every command supports `--json`, including
 errors. See [the CLI contract](docs/cli.md) for output schemas and exit codes.
+
+## Scoped agent work sessions
+
+Select an arbitrary batch with labels, or list a deliverable's descendants:
+
+```sh
+wrk update <id> --add-label burn-tonight --remove-label needs-triage
+wrk update <parent-id> --add-label burn-tonight --recursive
+wrk list --label burn-tonight
+wrk list --ready --label burn-tonight
+wrk list --ready --under <parent-id>
+wrk update <id> --status blocked
+wrk update <id> --status todo
+```
+
+Add/remove flags repeat and preserve unrelated labels; adding an existing label
+or removing an absent one is a no-op. Adding and removing the same label conflicts.
+Recursive updates permit labels only and include the root plus all descendants,
+even done/canceled tickets. Labels are a snapshot, not inheritance: supply
+`new --parent <id> --label burn-tonight` for later subtasks. `list --under` excludes
+the root. Repeated label filters require **all** labels; label, descendant, and
+status filters intersect. Dependencies outside the scope still affect readiness.
+
+An agent should read scope instructions and durable notes, resume eligible
+in-progress work, then pick a ready ticket, mark it in-progress, implement and
+verify it, record results, and mark it done. When work needs external input, record
+the reason, unblocking condition, and resume notes in its body, mark it blocked,
+and continue with other eligible work. Blocked stays visible in active lists and
+never becomes ready automatically; unblock explicitly. Only done satisfies a
+dependency. Status changes never cascade.
+
+Agree on scope, permissions, required verification, and stopping limits before a
+session. Stop when the batch is complete or nothing can proceed, and report
+unfinished work and blockers. An empty ready list alone does **not** mean complete:
+inspect in-progress/blocked work, unmet dependencies, and the root separately.
+Keep handoffs in ticket bodies. Follow the [full agent burn loop](docs/burns.md)
+for safe resumption and stop rules. These are CLI primitives and a workflow;
+there is no built-in AI runner or scheduler.
+
+Recursive labeling publishes one file at a time under one writer lock. On a
+partial failure, output identifies committed, unchanged, and pending tickets.
+Inspect the entire scope and resolve the error before retrying the same idempotent
+operation; retries use a fresh descendant snapshot. See
+[recursive publication and recovery](docs/storage.md#recursive-label-publication).
 
 ## Safe local use
 
 The nearest `.wrk` entry is the project boundary, even if invalid. `init` requires
 an existing target directory and refuses any existing `.wrk` entry. Any invalid
 ticket makes ordinary data commands fail; use read-only `wrk validate` for sorted,
-actionable diagnostics. Existing version-1 tickets need no migration.
+actionable diagnostics. Existing version-1 tickets need no migration. Older
+clients reject `blocked` status and may refuse all data commands once it appears; upgrade all clients
+before using it.
 
 CLI writers use a persistent advisory lock and check all validation inputs for
 changes before atomic publication. **Do direct body/config edits and Git operations
@@ -102,18 +148,22 @@ go run ./cmd/wrk list
 No initialization is needed here: the backlog already lives in [`.wrk/`](.wrk/).
 Prefer `go run ./cmd/wrk` over an installed binary that may be stale, or rebuild
 `./bin/wrk` after CLI changes. Read the [ticket editing contract](docs/ticket-format.md#editing-contract)
-before editing tickets; updates currently support title and status.
+before editing tickets.
 
 For code changes, run the development checks:
 
 ```sh
 gofmt -l cmd internal test
-go test ./...
-go test -race ./...
+go test -count=1 ./...
+go test -race -count=1 ./...
 go vet ./...
 go build -o ./bin/wrk ./cmd/wrk
 ```
 
-Formatting must report no files. Tests use disposable projects and retain the
+Formatting must report no files. Use `-count=1` so the integration package reruns
+its compiled CLI: it builds the binary in `TestMain`, and Go's test cache does not
+track that runtime build as a source dependency. Run the checks on both macOS and
+Linux local filesystems; cross-compilation alone does not exercise storage.
+Tests use disposable projects and retain the
 immutable original data in `testdata/compat/.wrk/`. [Sprint 001 evidence](docs/sprints/SPRINT-001-EXECUTION.md)
 records macOS/Linux verification and clean-source build/install runs.

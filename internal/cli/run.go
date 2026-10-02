@@ -100,7 +100,7 @@ func Run(args []string, cwd string, in io.Reader, out, errout io.Writer) int {
 		return renderMutation(out, errout, r, e, result)
 	}
 	if r.Command == "update" {
-		result := store.Update(root, r.Args[0], r.Title, r.Status)
+		result := store.UpdateWithOptions(root, r.Args[0], store.UpdateOptions{Changes: ticket.Changes{Title: r.Title, Status: r.Status, AddLabels: r.AddLabels, RemoveLabels: r.RemoveLabels}, Recursive: r.Recursive})
 		return renderMutation(out, errout, r, e, result)
 	}
 	s := project.Load(root)
@@ -114,7 +114,11 @@ func Run(args []string, cwd string, in io.Reader, out, errout io.Writer) int {
 		e.Result = map[string]any{"valid": true, "ticket_count": len(s.Tickets)}
 		human = fmt.Sprintf("Valid project: %d tickets", len(s.Tickets))
 	case "list":
-		tickets := s.List(r.All, r.Ready)
+		if r.Under != nil && (!ticket.IDPattern.MatchString(*r.Under) || s.ByID[*r.Under] == nil) {
+			e.Errors = append(e.Errors, diagnostic.New("NOT_FOUND", "scope root not found in this project", ""))
+			break
+		}
+		tickets := s.ScopedList(r.All, r.Ready, r.Labels, r.Under)
 		e.Result = map[string]any{"tickets": tickets}
 		human = listText(tickets)
 	case "show":
@@ -154,6 +158,9 @@ func listText(tickets []project.Summary) string {
 }
 
 func renderMutation(out, errout io.Writer, r Request, e Envelope, m store.Mutation) int {
+	if m.Updates != nil {
+		return renderRecursiveMutation(out, errout, r, e, m)
+	}
 	e.Errors = m.Diagnostics
 	e.OK = len(e.Errors) == 0
 	human := ""
@@ -176,6 +183,38 @@ func renderMutation(out, errout io.Writer, r Request, e Envelope, m store.Mutati
 		if m.Committed && !e.OK {
 			human += " (publication committed; inspect before retrying)"
 		}
+	}
+	code := 0
+	if !e.OK {
+		code = 1
+	}
+	return render(out, errout, r, e, human, code)
+}
+
+func renderRecursiveMutation(out, errout io.Writer, r Request, e Envelope, m store.Mutation) int {
+	e.Errors = m.Diagnostics
+	e.OK = len(e.Errors) == 0
+	human := ""
+	if e.OK || m.Committed {
+		type entry struct {
+			Ticket      project.Summary `json:"ticket"`
+			Changed     bool            `json:"changed"`
+			Publication string          `json:"publication"`
+		}
+		entries := make([]entry, 0, len(m.Updates))
+		lines := []string{"ID\tPATH\tPUBLICATION"}
+		for _, update := range m.Updates {
+			summary := m.Snapshot.Summary(update.Ticket)
+			entries = append(entries, entry{summary, update.Publication == "committed", update.Publication})
+			lines = append(lines, fmt.Sprintf("%s\t%s\t%s", summary.ID, summary.Path, update.Publication))
+		}
+		result := map[string]any{"root_id": m.Ticket.ID, "updates": entries, "changed": m.Changed}
+		if m.Committed && !e.OK {
+			result["publication"] = "committed"
+			lines = append(lines, "Partial or uncertain publication; inspect all targets before retrying.")
+		}
+		e.Result = result
+		human = strings.Join(lines, "\n")
 	}
 	code := 0
 	if !e.OK {

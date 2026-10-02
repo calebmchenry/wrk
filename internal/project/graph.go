@@ -1,6 +1,7 @@
 package project
 
 import (
+	"slices"
 	"sort"
 	"wrk/internal/diagnostic"
 	"wrk/internal/ticket"
@@ -50,13 +51,58 @@ func (s *Snapshot) Children(id string) []Summary {
 	return out
 }
 func (s *Snapshot) List(all, ready bool) []Summary {
+	return s.ScopedList(all, ready, nil, nil)
+}
+
+// Descendants excludes the root and follows parent edges only.
+func (s *Snapshot) Descendants(id string) map[string]bool {
+	children := map[string][]string{}
+	for _, t := range s.Tickets {
+		if t.Parent != nil {
+			children[*t.Parent] = append(children[*t.Parent], t.ID)
+		}
+	}
+	out := map[string]bool{}
+	queue := append([]string{}, children[id]...)
+	for len(queue) > 0 {
+		next := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		if out[next] {
+			continue
+		}
+		out[next] = true
+		queue = append(queue, children[next]...)
+	}
+	return out
+}
+
+// ScopedList intersects all labels and descendants with the status filter.
+// The caller validates that an explicitly supplied root exists.
+func (s *Snapshot) ScopedList(all, ready bool, labels []string, under *string) []Summary {
+	var descendants map[string]bool
+	if under != nil {
+		descendants = s.Descendants(*under)
+	}
 	out := []Summary{}
 	for _, t := range s.Tickets {
+		if under != nil && !descendants[t.ID] {
+			continue
+		}
+		matches := true
+		for _, label := range labels {
+			if !slices.Contains(t.Labels, label) {
+				matches = false
+				break
+			}
+		}
+		if !matches {
+			continue
+		}
 		if ready {
 			if t.Status != "todo" || len(s.Blockers(t)) > 0 {
 				continue
 			}
-		} else if !all && t.Status != "todo" && t.Status != "in-progress" {
+		} else if !all && t.Status != "todo" && t.Status != "in-progress" && t.Status != "blocked" {
 			continue
 		}
 		out = append(out, s.Summary(t))

@@ -12,7 +12,7 @@ import (
 var IDPattern = regexp.MustCompile(`^[a-z][a-z0-9]{0,15}-[0-9a-f]{8}$`)
 var FilenamePattern = regexp.MustCompile(`^[a-z][a-z0-9]{0,15}-[0-9a-f]{8}\.md$`)
 var PrefixPattern = regexp.MustCompile(`^[a-z][a-z0-9]{0,15}$`)
-var Statuses = map[string]bool{"todo": true, "in-progress": true, "done": true, "canceled": true}
+var Statuses = map[string]bool{"todo": true, "in-progress": true, "blocked": true, "done": true, "canceled": true}
 var Priorities = map[string]bool{"low": true, "normal": true, "high": true, "urgent": true}
 
 type FieldDefinition struct {
@@ -50,7 +50,7 @@ func Validate(t *Ticket, definitions map[string]FieldDefinition) []diagnostic.Di
 		add("title", "title must be nonblank and single-line")
 	}
 	if s, ok := schema.String(m["status"]); ok && !Statuses[s] {
-		add("status", "expected todo, in-progress, done, or canceled")
+		add("status", "expected todo, in-progress, blocked, done, or canceled")
 	}
 	if v, exists := m["parent"]; exists {
 		s, ok := schema.String(v)

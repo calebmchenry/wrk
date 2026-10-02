@@ -27,3 +27,5 @@ Support setting/clearing a parent and adding/removing dependencies. Carry creati
 ## Context
 
 Follow [the ticket format](../docs/ticket-format.md), [CLI contract](../docs/cli.md), and [storage boundary](../docs/storage.md). Sprint 001 deliberately deferred these update operations; title/status updates and creation-time parenting already work.
+
+2026-10-02: The release/upgrade batch (`list --all --label upgrade`, rooted in [wrk-551ff6c2](wrk-551ff6c2.md) and [wrk-8d5b1b84](wrk-8d5b1b84.md)) is a concrete consumer of dependency creation/update. Its prerequisites are currently body links because the supported CLI cannot create those edges. Once these commands exist, encode the still-relevant implementation prerequisites through the CLI and verify readiness. This metadata improvement does not block the upgrade implementation and must not be worked around by editing frontmatter.
