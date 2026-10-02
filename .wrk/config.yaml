@@ -1,0 +1,6 @@
+version: 1
+prefix: wrk
+defaults:
+  priority: normal
+  labels: []
+fields: {}
