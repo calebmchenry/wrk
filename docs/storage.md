@@ -42,12 +42,17 @@ that operation and remove its directory only if empty; never recursively delete.
 After interrupted init, inspect the incomplete directory and explicitly resolve it;
 `init` never adopts existing data.
 
-YAML updates clone nodes, detach aliases of edited scalars, label sequences, and
-label elements to retain their old
-meaning, reparse output, and compare all unrelated semantic values and exact body
-bytes. Unknown custom tags and recursive aliases are retained without expansion.
-Frontmatter comments/spacing are not byte guarantees. Unsupported preservation
-fails unchanged with PRESERVATION_UNSUPPORTED.
+YAML updates clone nodes and replace mapping edges without changing old value
+nodes. Before encoding, traverse the reachable graph once, relocate definitions
+whose original occurrence was removed, and generate unique anchors for shared or
+recursive values. This retains aliases of edited scalars, sequences, mappings,
+and custom values without expansion, including aliases used as mapping keys.
+Independent custom-field inputs cannot collide with existing anchor names.
+Reparse output and compare requested values, every unrelated value, and exact
+body bytes. Creation also verifies that encoding preserves the supplied values.
+Unknown custom tags and exact numeric scalar text survive; comments, spacing,
+and anchor names are not byte guarantees. Unsupported preservation fails unchanged
+with PRESERVATION_UNSUPPORTED.
 
 
 ## Recursive label publication

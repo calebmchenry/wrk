@@ -10,10 +10,13 @@ checkout, or use a freshly rebuilt `./bin/wrk`.
 
 - Edit Markdown bodies directly for descriptions, acceptance criteria, and handoff notes.
 - Use `wrk new` to create tickets. Creation supports `--body-file` (including stdin),
-  `--parent`, `--priority`, repeated `--label`, and `--no-labels`.
-- Use `wrk update <id> --title ... --status ...` for either or both metadata changes.
-  Never change an existing ticket's ID. Other metadata updates remain follow-up work;
-  the deferred operations do not authorize manual frontmatter edits.
+  `--parent`, `--priority`, repeated `--label`, `--no-labels`, repeated `--depends-on`,
+  and repeated `--field name=YAML`.
+- Use `wrk update <id>` for title/status/priority, labels, parent/dependency, and
+  custom-field changes. Clear parenting with `--no-parent`, edit prerequisites with
+  `--add-dependency` / `--remove-dependency`, and set/remove custom values with
+  `--field name=YAML` / `--remove-field name`. Only labels support `--recursive`.
+  Never change an existing ticket's ID. See the CLI contract for conflicts and quoting.
 - `.wrk/config.yaml` may be edited directly. Defaults affect only new tickets.
 - Run `wrk validate` to check the whole project. Normal data commands fail if any
   ticket is invalid; restore known-good data or obtain explicit repair authorization.

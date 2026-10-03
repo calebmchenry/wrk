@@ -115,22 +115,41 @@ Use `new --parent <id>` for children. Creation supports `--priority`, repeated
 `--label` (replaces configured labels), and `--no-labels`. Updates support
 `--title`, `--status`, `--priority`, repeated `--label` to replace the entire label
 list, `--no-labels` to clear it, and repeated `--add-label` / `--remove-label` for
-incremental edits. General parent/dependency and custom field updates remain
-follow-up work.
+incremental edits. Parent/dependency and custom-field edits are supported too:
 
 ```sh
 wrk update <id> --priority urgent --label backend --label cli
 wrk update <id> --no-labels
 wrk update <id> --priority normal --add-label reviewed --remove-label needs-triage
+wrk update <id> --parent <parent-id>
+wrk update <id> --no-parent --add-dependency <prerequisite-id>
+wrk update <id> --remove-dependency <prerequisite-id>
+wrk new "Estimate work" --depends-on <prerequisite-id> --field 'estimate=3.5'
+wrk update <id> --field 'customer="123"' --field 'needs_review=true'
+wrk update <id> --remove-field estimate
 ```
 
 Priority is `low`, `normal`, `high`, or `urgent`. Replacement/clearing conflicts
 with add/remove flags, and `--label` conflicts with `--no-labels`. Any one label
-mode can combine with title/status/priority in a single validated update.
+mode can combine with other metadata changes in a single validated update.
 Replacement preserves supplied order and duplicates in source; JSON summaries
 sort labels. Unchanged values are no-ops, including clearing absent labels or
 setting an omitted priority to its effective value `normal`. Creation defaults
 never change existing tickets or influence updates.
+
+Parent set/clear flags conflict. Dependency add/remove flags are repeatable and
+idempotent, but adding and removing the same ID conflicts. Creation accepts
+repeated `--depends-on` and rejects duplicate edges. Relationships must reference
+existing tickets and cannot form cycles within either graph.
+
+Repeated `--field 'name=YAML'` sets typed custom values on creation or update;
+`--remove-field name` removes them. Shell quotes preserve the argument, while
+inner YAML quotes select strings such as `"123"` or `"true"`. Values retain YAML
+tags, nested collections, aliases, and exact numeric precision. Configured types
+are checked without coercion. Repeated assignments or setting/removing the same
+field conflict. Removing absent fields and setting identical values are no-ops.
+See [relationship edits](docs/cli.md#relationship-updates) and
+[custom-field input](docs/cli.md#custom-field-input-and-updates) for full semantics.
 
 Bare `wrk` prints help. Flags may come before or after positional arguments;
 `--flag=value` and `--` are supported. Every command supports `--json`, including

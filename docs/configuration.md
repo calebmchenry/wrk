@@ -53,6 +53,12 @@ Definitions require a `type`: `string`, `number`, `boolean`, or `enum`. Enum def
 
 Values live under `fields` in ticket frontmatter. A configured field must match its declared type, without implicit coercion. Unconfigured custom fields are allowed and their values must be preserved when other metadata changes. Configuring or changing a definition can reveal invalid existing values; validation reports those tickets without rewriting them.
 
+Supply values with `new/update --field 'name=YAML'` and remove them with
+`update --remove-field name`. YAML types are explicit: `--field 'estimate=3'`
+supplies a number, while `--field 'customer="3"'` supplies a string. These flags
+never modify definitions or provide new defaults. See [custom-field input and
+updates](cli.md#custom-field-input-and-updates) for quoting, aliases, and no-ops.
+
 ## CLI behavior
 
 - Discover the project by walking upward from the working directory to the nearest entry named `.wrk`. It is the authoritative project boundary even when it is a file or forbidden symlink; do not fall through to an outer project if its configuration is missing or invalid.

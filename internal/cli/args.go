@@ -13,12 +13,24 @@ type Request struct {
 	Args                                               []string
 	Title, Status, BodyFile, Parent, Priority, Under   *string
 	Labels, AddLabels, RemoveLabels                    []string
+	NoParent                                           bool
+	Dependencies, AddDependencies, RemoveDependencies  []string
+	Fields                                             []ticket.FieldValue
+	RemoveFields                                       []string
 }
 
 var commandFlags = map[string]map[string]bool{
 	"version": {}, "upgrade": {"check": false},
-	"init": {}, "new": {"body-file": true, "parent": true, "priority": true, "label": true, "no-labels": false},
-	"list": {"all": false, "ready": false, "label": true, "under": true}, "show": {}, "update": {"title": true, "status": true, "priority": true, "label": true, "no-labels": false, "add-label": true, "remove-label": true, "recursive": false}, "validate": {}, "help": {},
+	"init": {}, "new": {"body-file": true, "parent": true, "priority": true, "label": true, "no-labels": false, "depends-on": true, "field": true},
+	"list": {"all": false, "ready": false, "label": true, "under": true}, "show": {},
+	"update": {"title": true, "status": true, "priority": true, "label": true, "no-labels": false, "add-label": true, "remove-label": true, "recursive": false,
+		"parent": true, "no-parent": false, "add-dependency": true, "remove-dependency": true, "field": true, "remove-field": true},
+	"validate": {}, "help": {},
+}
+
+var repeatableFlags = map[string]bool{
+	"label": true, "add-label": true, "remove-label": true, "depends-on": true,
+	"add-dependency": true, "remove-dependency": true, "field": true, "remove-field": true,
 }
 
 func Parse(args []string) (Request, error) {
@@ -46,7 +58,7 @@ func Parse(args []string) (Request, error) {
 					return r, fmt.Errorf("unknown flag %s for %s", a, r.Command)
 				}
 			}
-			if name != "label" && name != "add-label" && name != "remove-label" && seen[name] {
+			if !repeatableFlags[name] && seen[name] {
 				return r, fmt.Errorf("flag --%s may only be supplied once", name)
 			}
 			seen[name] = true
@@ -92,6 +104,22 @@ func Parse(args []string) (Request, error) {
 				r.BodyFile = &value
 			case "parent":
 				r.Parent = &value
+			case "no-parent":
+				r.NoParent = true
+			case "depends-on":
+				r.Dependencies = append(r.Dependencies, value)
+			case "add-dependency":
+				r.AddDependencies = append(r.AddDependencies, value)
+			case "remove-dependency":
+				r.RemoveDependencies = append(r.RemoveDependencies, value)
+			case "field":
+				field, err := ticket.ParseField(value)
+				if err != nil {
+					return r, err
+				}
+				r.Fields = append(r.Fields, field)
+			case "remove-field":
+				r.RemoveFields = append(r.RemoveFields, value)
 			case "priority":
 				r.Priority = &value
 			}
@@ -142,8 +170,13 @@ func Parse(args []string) (Request, error) {
 		if err := r.changes().Validate(); err != nil {
 			return r, err
 		}
-		if r.Recursive && (r.Title != nil || r.Status != nil || r.Priority != nil) {
+		if r.Recursive && r.changes().HasNonLabelChanges() {
 			return r, fmt.Errorf("--recursive permits only label changes")
+		}
+	}
+	if r.Command == "new" {
+		if err := ticket.ValidateFields(r.Fields, nil); err != nil {
+			return r, err
 		}
 	}
 	if r.Command == "list" {
@@ -156,12 +189,15 @@ func Parse(args []string) (Request, error) {
 	return r, nil
 }
 
-// changes translates the command's label mode once for validation and mutation.
+// changes translates command options once for validation and mutation.
 func (r Request) changes() ticket.Changes {
 	return ticket.Changes{
 		Title: r.Title, Status: r.Status, Priority: r.Priority,
 		AddLabels: r.AddLabels, RemoveLabels: r.RemoveLabels,
 		Labels: r.Labels, LabelsSet: r.NoLabels || len(r.Labels) > 0,
+		Parent: r.Parent, NoParent: r.NoParent,
+		AddDependencies: r.AddDependencies, RemoveDependencies: r.RemoveDependencies,
+		Fields: r.Fields, RemoveFields: r.RemoveFields,
 	}
 }
 

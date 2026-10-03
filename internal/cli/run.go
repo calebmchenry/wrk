@@ -134,7 +134,7 @@ func run(args []string, cwd string, in io.Reader, out, errout io.Writer, updater
 		return render(out, errout, r, e, "", 1)
 	}
 	if r.Command == "new" {
-		result := store.Create(root, store.CreateOptions{Title: r.Args[0], Body: body, Parent: r.Parent, Priority: r.Priority, Labels: r.Labels, LabelsSet: r.NoLabels || len(r.Labels) > 0})
+		result := store.Create(root, store.CreateOptions{Title: r.Args[0], Body: body, Parent: r.Parent, Priority: r.Priority, Labels: r.Labels, LabelsSet: r.NoLabels || len(r.Labels) > 0, Dependencies: r.Dependencies, Fields: r.Fields})
 		return renderMutation(out, errout, r, e, result)
 	}
 	if r.Command == "update" {

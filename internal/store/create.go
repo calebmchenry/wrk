@@ -17,12 +17,17 @@ type CreateOptions struct {
 	Parent, Priority *string
 	Labels           []string
 	LabelsSet        bool
+	Dependencies     []string
+	Fields           []ticket.FieldValue
 }
 
 func Create(root string, options CreateOptions) Mutation {
 	return create(root, options, rand.Reader, nil)
 }
 func create(root string, options CreateOptions, random io.Reader, h *hooks) Mutation {
+	if err := ticket.ValidateFields(options.Fields, nil); err != nil {
+		return Mutation{Diagnostics: []diagnostic.Diagnostic{diagnostic.New("USAGE", err.Error(), "")}}
+	}
 	return withLock(root, func(s *project.Snapshot) Mutation {
 		result := Mutation{Snapshot: s, Diagnostics: []diagnostic.Diagnostic{}}
 		for attempt := 0; attempt < 128; attempt++ {
@@ -51,7 +56,7 @@ func create(root string, options CreateOptions, random io.Reader, h *hooks) Muta
 			if options.LabelsSet {
 				labels = options.Labels
 			}
-			data, err := ticket.Create(id, options.Title, priority, options.Parent, labels, options.Body)
+			data, err := ticket.CreateWithMetadata(id, options.Title, priority, options.Parent, labels, options.Dependencies, options.Fields, options.Body)
 			if err != nil {
 				result.Diagnostics = append(result.Diagnostics, operationError(err, path, false))
 				return result

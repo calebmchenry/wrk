@@ -56,15 +56,36 @@ func Equal(a, b *yaml.Node) bool {
 }
 
 type Changes struct {
-	Title, Status, Priority *string
-	AddLabels, RemoveLabels []string
-	Labels                  []string
-	LabelsSet               bool
+	Title, Status, Priority             *string
+	AddLabels, RemoveLabels             []string
+	Labels                              []string
+	LabelsSet                           bool
+	Parent                              *string
+	NoParent                            bool
+	AddDependencies, RemoveDependencies []string
+	Fields                              []FieldValue
+	RemoveFields                        []string
 }
 
 func (c Changes) Validate() error {
-	if c.Title == nil && c.Status == nil && c.Priority == nil && !c.LabelsSet && len(c.AddLabels) == 0 && len(c.RemoveLabels) == 0 {
-		return fmt.Errorf("update requires --title, --status, --priority, --label, --no-labels, --add-label, or --remove-label")
+	if !c.HasNonLabelChanges() && !c.LabelsSet && len(c.AddLabels) == 0 && len(c.RemoveLabels) == 0 {
+		return fmt.Errorf("update requires at least one metadata change (see wrk help update)")
+	}
+	if c.Parent != nil && c.NoParent {
+		return fmt.Errorf("--parent and --no-parent conflict")
+	}
+	for _, id := range c.AddDependencies {
+		if slices.Contains(c.RemoveDependencies, id) {
+			return fmt.Errorf("cannot add and remove the same dependency %q", id)
+		}
+	}
+	for _, id := range c.RemoveDependencies {
+		if !IDPattern.MatchString(id) {
+			return fmt.Errorf("--remove-dependency requires a ticket ID, got %q", id)
+		}
+	}
+	if err := ValidateFields(c.Fields, c.RemoveFields); err != nil {
+		return err
 	}
 	if c.LabelsSet && (len(c.AddLabels) > 0 || len(c.RemoveLabels) > 0) {
 		return fmt.Errorf("--label/--no-labels conflict with --add-label/--remove-label")
@@ -82,6 +103,11 @@ func (c Changes) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (c Changes) HasNonLabelChanges() bool {
+	return c.Title != nil || c.Status != nil || c.Priority != nil || c.Parent != nil || c.NoParent ||
+		len(c.AddDependencies) > 0 || len(c.RemoveDependencies) > 0 || len(c.Fields) > 0 || len(c.RemoveFields) > 0
 }
 
 func stringNode(s string) *yaml.Node {
@@ -110,85 +136,39 @@ func PatchChanges(t *Ticket, c Changes) ([]byte, bool, error) {
 		}
 	}
 	labels, _ := schema.StringList(old["labels"], true)
-	next := []string{}
-	for _, label := range labels {
-		if !slices.Contains(c.RemoveLabels, label) {
-			next = append(next, label)
-		}
-	}
-	for _, label := range c.AddLabels {
-		if !slices.Contains(next, label) {
-			next = append(next, label)
-		}
-	}
+	next := editList(labels, c.AddLabels, c.RemoveLabels)
 	if c.LabelsSet {
 		next = c.Labels
 	}
 	if !slices.Equal(labels, next) {
-		node := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
-		for _, label := range next {
-			node.Content = append(node.Content, stringNode(label))
+		changes["labels"] = stringListNode(next)
+	}
+	if c.Parent != nil {
+		parent, _ := schema.String(old["parent"])
+		if old["parent"] == nil || parent != *c.Parent {
+			changes["parent"] = stringNode(*c.Parent)
 		}
-		changes["labels"] = node
+	} else if c.NoParent && old["parent"] != nil {
+		changes["parent"] = nil // A cleared parent is omitted, never null.
+	}
+	dependencies, _ := schema.StringList(old["depends_on"], true)
+	nextDependencies := editList(dependencies, c.AddDependencies, c.RemoveDependencies)
+	if !slices.Equal(dependencies, nextDependencies) {
+		changes["depends_on"] = stringListNode(nextDependencies)
+	}
+
+	n := clone(t.Node, map[*yaml.Node]*yaml.Node{})
+	m := schema.Map(n)
+	fields, fieldsChanged := patchFields(m["fields"], c.Fields, c.RemoveFields)
+	if fieldsChanged {
+		changes["fields"] = fields
 	}
 	if len(changes) == 0 {
 		return bytes.Clone(t.Source), false, nil
 	}
-	n := clone(t.Node, map[*yaml.Node]*yaml.Node{})
-	m := schema.Map(n)
-	// Detach aliases of removed definitions, including a labels sequence and its
-	// anchored elements. Built-in edited values resolve only to strings/lists of
-	// strings, so copying them cannot expand arbitrary custom alias graphs.
-	for _, key := range []string{"title", "status", "priority", "labels"} {
-		if changes[key] == nil {
-			continue
-		}
-		target := m[key]
-		if target == nil {
-			continue
-		}
-		removed := map[*yaml.Node]bool{target: true}
-		for _, child := range target.Content {
-			removed[child] = true
-		}
-		seen := map[*yaml.Node]bool{}
-		var detach func(*yaml.Node)
-		detach = func(v *yaml.Node) {
-			if v == nil || seen[v] {
-				return
-			}
-			seen[v] = true
-			if v.Kind == yaml.AliasNode && removed[v.Alias] {
-				resolved := schema.Resolve(v)
-				if resolved != nil && resolved.Kind == yaml.ScalarNode {
-					*v = *resolved
-					v.Anchor = ""
-					v.Alias = nil
-				} else if values, ok := schema.StringList(resolved, true); ok {
-					*v = yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
-					for _, value := range values {
-						v.Content = append(v.Content, stringNode(value))
-					}
-				}
-				return
-			}
-			for _, c := range v.Content {
-				detach(c)
-			}
-		}
-		detach(n)
-	}
-	inserted := 0
-	for i := 0; i < len(n.Content); i += 2 {
-		key, _ := schema.String(n.Content[i])
-		if v, ok := changes[key]; ok {
-			n.Content[i+1] = v
-		}
-	}
-	for _, key := range []string{"priority", "labels"} {
-		if changes[key] != nil && old[key] == nil {
-			n.Content = append(n.Content, stringNode(key), changes[key])
-			inserted++
+	for _, key := range []string{"title", "status", "priority", "labels", "parent", "depends_on", "fields"} {
+		if v, changed := changes[key]; changed {
+			setMapEntry(n, key, v)
 		}
 	}
 	data, err := encode(n, t.Body)
@@ -200,18 +180,87 @@ func PatchChanges(t *Ticket, c Changes) ([]byte, bool, error) {
 		return nil, false, fmt.Errorf("PRESERVATION_UNSUPPORTED: emitted YAML did not reparse")
 	}
 	am := schema.Map(after.Node)
-	if !bytes.Equal(t.Body, after.Body) || len(old)+inserted != len(am) {
-		return nil, false, fmt.Errorf("PRESERVATION_UNSUPPORTED: body or field set changed")
-	}
-	for key, want := range changes {
-		if !Equal(am[key], want) {
+	wantCount := len(old)
+	for key, value := range changes {
+		if old[key] == nil && value != nil {
+			wantCount++
+		} else if old[key] != nil && value == nil {
+			wantCount--
+		}
+		if !Equal(am[key], value) {
 			return nil, false, fmt.Errorf("PRESERVATION_UNSUPPORTED: %s changed unexpectedly", key)
 		}
 	}
+	if !bytes.Equal(t.Body, after.Body) || wantCount != len(am) {
+		return nil, false, fmt.Errorf("PRESERVATION_UNSUPPORTED: body or field set changed")
+	}
 	for key, before := range old {
-		if changes[key] == nil && !Equal(before, am[key]) {
+		if _, changed := changes[key]; !changed && !Equal(before, am[key]) {
 			return nil, false, fmt.Errorf("PRESERVATION_UNSUPPORTED: unrelated %s changed", key)
 		}
 	}
+	// A custom value may alias the entire frontmatter. Verify untouched values
+	// against the original graph as well as the intended patched fields mapping.
+	if fieldsChanged {
+		touched := map[string]bool{}
+		af := schema.Map(am["fields"])
+		for _, field := range c.Fields {
+			if !Equal(field.Value, af[field.Name]) {
+				return nil, false, fmt.Errorf("PRESERVATION_UNSUPPORTED: intended fields.%s changed", field.Name)
+			}
+			touched[field.Name] = true
+		}
+		for _, name := range c.RemoveFields {
+			touched[name] = true
+		}
+		for name, before := range schema.Map(old["fields"]) {
+			if !touched[name] && !Equal(before, af[name]) {
+				return nil, false, fmt.Errorf("PRESERVATION_UNSUPPORTED: unrelated fields.%s changed", name)
+			}
+		}
+	}
 	return data, true, nil
+}
+
+func editList(old, add, remove []string) []string {
+	next := []string{}
+	for _, value := range old {
+		if !slices.Contains(remove, value) {
+			next = append(next, value)
+		}
+	}
+	for _, value := range add {
+		if !slices.Contains(next, value) {
+			next = append(next, value)
+		}
+	}
+	return next
+}
+
+func stringListNode(values []string) *yaml.Node {
+	n := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+	for _, value := range values {
+		n.Content = append(n.Content, stringNode(value))
+	}
+	return n
+}
+
+// Replace edges, never the referenced value nodes: aliases elsewhere retain
+// their original targets. encode relocates any definitions no longer in Content.
+func setMapEntry(n *yaml.Node, key string, value *yaml.Node) {
+	for i := 0; i < len(n.Content); i += 2 {
+		name, _ := schema.String(n.Content[i])
+		if name != key {
+			continue
+		}
+		if value == nil {
+			n.Content = append(n.Content[:i], n.Content[i+2:]...)
+		} else {
+			n.Content[i+1] = value
+		}
+		return
+	}
+	if value != nil {
+		n.Content = append(n.Content, stringNode(key), value)
+	}
 }

@@ -16,13 +16,17 @@ Usage:
   wrk upgrade [--check]
   wrk init [directory]
   wrk new "Title" [--body-file path|-] [--parent id] [--priority value]
-                  [--label value ... | --no-labels]
+                  [--label value ... | --no-labels] [--depends-on id ...]
+                  [--field name=YAML ...]
   wrk list [--all | --ready] [--label value ...] [--under id]
   wrk show <id>
   wrk update <id> [--title "Title"] [--status todo|in-progress|blocked|done|canceled]
                   [--priority low|normal|high|urgent]
                   [--label value ... | --no-labels |
                    --add-label value ... --remove-label value ...] [--recursive]
+                  [--parent id | --no-parent]
+                  [--add-dependency id ...] [--remove-dependency id ...]
+                  [--field name=YAML ...] [--remove-field name ...]
   wrk validate
   wrk help [command]
 
@@ -33,6 +37,13 @@ Ready means todo with every dependency done. Blocked stays active, never ready.
 Recursive updates include the root and all descendants, regardless of status;
 only label changes are allowed. Add/remove of the same label conflicts.
 Recursive writes publish one ticket at a time; inspect partial failures before retrying.
+Parent/dependency edits validate references and each graph's cycles independently.
+Dependency add/remove is idempotent; adding and removing the same ID conflicts.
+--field sets a typed YAML value; quote YAML strings that resemble numbers/booleans.
+Field names split at the first unescaped =; escape name characters as \= or \\.
+Each field value is an independent YAML document.
+Duplicate field assignments and setting/removing the same field conflict.
+Removing an absent field is a no-op; use explicit null to store a YAML null value.
 
 Version and upgrade work without a project. Upgrade --check writes no files.
 Upgrade installs the latest stable release for standalone release binaries only.

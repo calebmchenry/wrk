@@ -88,6 +88,10 @@ func Parse(data []byte, path string) (*Ticket, []diagnostic.Diagnostic) {
 }
 
 func encode(node *yaml.Node, body []byte) ([]byte, error) {
+	node, err := emissionGraph(node)
+	if err != nil {
+		return nil, err
+	}
 	var b bytes.Buffer
 	b.WriteString("---\n")
 	enc := yaml.NewEncoder(&b)

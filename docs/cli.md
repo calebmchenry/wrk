@@ -12,6 +12,7 @@
 | `wrk new "Title"` | Create a `todo` ticket with configured prefix, priority, and labels; print ID/path. |
 | `wrk new "Title" --body-file path` | Exact UTF-8 body bytes; `-` reads stdin through EOF before locking. |
 | `wrk new "Title" --parent id` | Create a child of an existing project ticket. |
+| `wrk new "Title" --depends-on id --field estimate=3` | Repeatable prerequisites and typed custom values at creation. |
 | `wrk new "Title" --priority high --label cli --label storage` | Explicit overrides; supplied labels replace the entire configured default list. |
 | `wrk new "Title" --no-labels` | Explicit empty labels; conflicts with `--label`. |
 | `wrk list` | `todo`, `in-progress`, and manually `blocked` tickets, including unfinished dependency blockers. |
@@ -24,6 +25,9 @@
 | `wrk update id --add-label burn --remove-label triage` | Repeatable, idempotent label edits; may combine with title/status/priority. |
 | `wrk update id --priority high --label cli --label storage` | Set priority and replace the entire label list. |
 | `wrk update id --no-labels` | Clear labels; absent/already-empty labels are a no-op. |
+| `wrk update id --parent other-id` | Set or change a parent; `--no-parent` removes it. |
+| `wrk update id --add-dependency other-id --remove-dependency old-id` | Repeatable, idempotent dependency edits. |
+| `wrk update id --field estimate=5 --remove-field obsolete` | Set typed YAML values or remove custom fields by name. |
 | `wrk update id --add-label burn --recursive` | Labels only; root plus all descendants, regardless of status. Per-ticket publication results. |
 | `wrk validate` | Aggregate determinable errors without writes. |
 
@@ -107,7 +111,7 @@ Titles are nonblank single-line strings; supplied spacing is retained. Prioritie
 are `low`, `normal`, `high`, `urgent`; statuses are `todo`, `in-progress`, `blocked`,
 `done`, `canceled`. Duplicate labels remain allowed. Only `done` satisfies a dependency.
 Explicit changes on blocked tickets and reopening are allowed. Nothing cascades.
-General relationship and custom-field update flags are deferred.
+Relationship and custom-field edits can combine with other single-ticket metadata changes.
 
 ## Priority and replacement updates
 
@@ -161,8 +165,7 @@ flag order. `--recursive` requires at least one label mutation and rejects title
 status, priority, or other metadata edits. It supports replacement, clearing, and
 incremental label modes with the same conflicts described above. Recursive
 replacement/clearing changes each target's entire label list; use add/remove to
-retain unrelated labels. Relationship and custom-field update flags remain
-unsupported.
+retain unrelated labels. Relationship and custom-field edits are single-ticket only.
 
 Recursive labeling selects the root **and** all descendants, at every depth and
 in every status, following parent edges only. It applies a snapshot, not
@@ -183,6 +186,76 @@ The project format and JSON schema remain version 1. Existing tickets need no
 migration, but older clients reject the new blocked value and may refuse **all**
 data commands in a project containing it. Upgrade all clients before using it.
 
+## Relationship updates
+
+`update --parent id` sets or changes the parent; `--no-parent` removes its key.
+Setting the same parent or clearing an absent parent is a no-op. The two flags
+conflict, and each may appear only once. Reparenting changes derived children and
+`list --under` immediately; the ID and filename stay fixed.
+
+`new --depends-on id` is repeatable. It preserves argument order and rejects
+duplicate edges. On updates, `--add-dependency id` and `--remove-dependency id`
+are repeatable and idempotent. Existing edges keep their order; new edges append
+once in argument order. Removing an absent edge is a no-op, including a valid ID
+that is not in the project. A removal argument must have ticket-ID syntax.
+Removing the last edge leaves `depends_on: []`; no-op removal leaves an omitted
+field omitted. Adding and removing the same ID is `USAGE` (exit 2), regardless
+of argument order or current data.
+
+All resulting parent/dependency references must exist in the project. Invalid
+candidate values, missing references, self-references, duplicate edges, and cycles
+fail validation (exit 1) without publishing any part of a combined update.
+Parent and dependency cycles are checked separately: a parent may depend on its
+children. Explicit status changes remain allowed despite unfinished dependencies;
+reopening is allowed and changes never cascade. Only `done` satisfies an edge.
+
+## Custom-field input and updates
+
+`new` and `update` accept repeated `--field 'name=YAML'`; `update` also accepts
+repeated `--remove-field name`. Set flags change only the named values; they do
+not replace the entire `fields` map. Removal deletes the named key. Removing the
+last value leaves `fields: {}`; removing absent names never inserts a map.
+
+Each value is exactly one independent YAML document, parsed as nodes without
+Go-value or JSON conversion. Nested collections, custom tags, recursive aliases,
+and exact numeric scalar text are supported. Anchors are local to each argument;
+an alias cannot refer to another argument or the existing ticket. Duplicate YAML
+keys, malformed YAML, empty values, and extra documents are usage errors. Use
+explicit `null` to store a null, or YAML `''` for an empty string. Shell quoting
+protects the argument; inner YAML quotes determine its type:
+
+```sh
+wrk new "Estimate work" --field 'estimate=3.5' --field 'needs_review=true'
+wrk update <id> --field 'customer="123"' --field 'area=cli'
+wrk update <id> --field 'precise=!!int 123456789012345678901234567890'
+wrk update <id> --field 'opaque=!tag {steps: [one, two]}' --remove-field obsolete
+```
+
+Field names are nonempty UTF-8 strings and remain literal: dots do not select
+nested paths. The first unescaped `=` separates name and value. In the name only,
+write `\=` for a literal equals sign and `\\` for a literal backslash, for example
+`--field 'a\=b=3'` sets the name `a=b`. `--remove-field` takes the literal name
+without this escaping, for example `--remove-field 'a=b'`.
+
+Setting the same name more than once or setting and removing the same name is
+`USAGE`, regardless of order. Repeated removals are harmless. Setting an identical
+resolved YAML graph is a no-op; tags, exact scalar text, and collection order
+matter, while comments, styles, and anchor names do not. Thus `1` and `1.0` are
+separate source values, and quoting `"true"` selects a string instead of a boolean.
+A no-op preserves all source bytes and file identity, even for omitted fields.
+
+Configured string, number, boolean, and enum definitions are enforced without
+coercion (exit 1, `INVALID_TICKET`). Unconfigured values may be arbitrary YAML,
+including null. Definitions and all fields remain optional. Existing invalid
+projects are rejected before mutation; removing a bad field is not a repair bypass.
+
+Edits preserve exact bodies, permission bits, unrelated built-ins, and every
+unrelated custom value. Aliases of replaced/removed definitions retain their old
+values; anchors may be renamed or relocated. The output is reparsed and checked
+before publication. If unrelated values cannot be preserved (for example an
+untouched alias of the entire changing frontmatter), the update fails unchanged
+with `PRESERVATION_UNSUPPORTED`. See the [storage contract](storage.md).
+
 ## Discovery and validation
 
 Walk upward to the nearest entry named `.wrk`. A file, symlink, missing config,
@@ -202,7 +275,7 @@ tags, collections, and aliases. Parent and dependency graphs are checked separat
 `validate` sorts diagnostics by path, field/location, and code. If malformed inputs
 prevent a later check, `CHECK_UNAVAILABLE` says so. Restore a known-good file or
 obtain explicitly authorized repair; an invalid project cannot be repaired with
-this sprint's `update`. This does not grant a manual-frontmatter editing exception.
+`update`. This does not grant a manual-frontmatter editing exception.
 Read commands create no locks, caches, or other files.
 
 ## Human and JSON output

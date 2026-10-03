@@ -7,6 +7,7 @@ Use this project's own CLI to track work in [`.wrk/`](../.wrk/). Follow the [dai
 - [Ticket format and editing rules](ticket-format.md)
 - [Project configuration](configuration.md)
 - [CLI commands and output contract](cli.md)
+- [Parent and dependency edits](cli.md#relationship-updates) and [typed custom fields](cli.md#custom-field-input-and-updates)
 - [Storage, concurrency, and recovery](storage.md)
 - [Release packaging, publication, and upgrade verification](releases.md)
 - [v0.1.0 platform and upgrade verification evidence](release-verification.md)
@@ -15,10 +16,10 @@ Use this project's own CLI to track work in [`.wrk/`](../.wrk/). Follow the [dai
 
 Agents may edit ticket bodies directly. Creation and changes to frontmatter, relationships, or status go through the CLI. Project configuration may be edited directly.
 
-The CLI supports initialization, creation with parent/priority/label overrides,
-list/show/validate, title/status/priority updates (including blocked), and
-single-ticket or recursive label replacement/clear/add/remove operations. Lists can filter labels and descendants.
-Other metadata updates remain deferred; do not edit them manually. Direct body/config edits and Git operations must occur outside CLI mutations; see the accepted [external-editor boundary](storage.md).
+The CLI supports initialization, creation with parent/dependency/priority/label/custom-field
+values, list/show/validate, and updates to every mutable metadata field (including
+blocked status). Label replacement/clear/add/remove also supports recursive updates.
+Lists can filter labels and descendants. IDs remain immutable; change metadata through the CLI. Direct body/config edits and Git operations must occur outside CLI mutations; see the accepted [external-editor boundary](storage.md).
 
 ## Daily workflow
 
@@ -80,18 +81,18 @@ Use the CLI for current status and the complete backlog; these links provide con
 for the initial milestones and deferred scope.
 
 - [wrk-9d42c6a1: Define the ticket format](../.wrk/wrk-9d42c6a1.md) — done
-- [wrk-3f8a21b7: Build the minimal CLI](../.wrk/wrk-3f8a21b7.md)
+- [wrk-3f8a21b7: Build the minimal CLI](../.wrk/wrk-3f8a21b7.md) — done
 - [wrk-682f60c7: Ship the first runnable CLI for dogfooding](../.wrk/wrk-682f60c7.md) — done; first runnable CLI verified on macOS and Linux
 
-- [wrk-1a09af55: Support parent and dependency updates](../.wrk/wrk-1a09af55.md)
+- [wrk-1a09af55: Support parent and dependency updates](../.wrk/wrk-1a09af55.md) — done
 - [wrk-e146d171: Support priority and label updates](../.wrk/wrk-e146d171.md)
-- [wrk-c12ff4c6: Support custom-field creation and updates](../.wrk/wrk-c12ff4c6.md)
+- [wrk-c12ff4c6: Support custom-field creation and updates](../.wrk/wrk-c12ff4c6.md) — done
 - [wrk-d965ba66: Scoped AI task burns](../.wrk/wrk-d965ba66.md) — labels, descendant scopes, blocked status, and the burn workflow
 
 Release and upgrade work:
 
 - [wrk-551ff6c2: Publish versioned binaries](../.wrk/wrk-551ff6c2.md) — version metadata, platform packaging, and release publication.
-- [wrk-8d5b1b84: Upgrade to the latest stable release](../.wrk/wrk-8d5b1b84.md) — check, install, and verify/document the upgrade path. List both deliverables and their children with `go run ./cmd/wrk list --all --label upgrade`; implementation prerequisites are recorded in ticket bodies until dependency mutation is supported.
+- [wrk-8d5b1b84: Upgrade to the latest stable release](../.wrk/wrk-8d5b1b84.md) — check, install, and verify/document the upgrade path. List both deliverables and their children with `go run ./cmd/wrk list --all --label upgrade`; implementation prerequisites are recorded as dependency edges; ticket bodies retain the sequencing rationale.
 
 ## Sprint plans
 

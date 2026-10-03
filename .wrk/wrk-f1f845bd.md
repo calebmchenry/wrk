@@ -6,6 +6,9 @@ parent: wrk-8d5b1b84
 priority: normal
 labels:
   - upgrade
+depends_on:
+  - wrk-bab18df9
+  - wrk-2c22eb33
 ---
 ## Outcome
 
@@ -57,3 +60,5 @@ See [durable verification evidence](../docs/release-verification.md),
 [CLI contract](../docs/cli.md#version-and-upgrade). Local formatting, uncached tests,
 race tests, vet, build, actionlint v1.7.12, GoReleaser v2.18.2 validation/snapshot
 packaging, and project validation passed. Remaining work for this item: none.
+
+2026-10-02 relationship follow-up: the prerequisites listed above are now encoded through `wrk update --add-dependency`, delivered by [wrk-1a09af55](wrk-1a09af55.md). All referenced prerequisites are done; this completed ticket has no dependency blockers. Earlier body-only dependency notes describe the pre-implementation state.

@@ -88,8 +88,13 @@ func TestMetadataPublicationFailures(t *testing.T) {
 	for _, point := range []string{"write", "sync", "close", "rename", "dir_sync", "before_compare"} {
 		t.Run(point, func(t *testing.T) {
 			root := testProject(t)
+			related := Create(root, CreateOptions{Title: "Related"})
+			if len(related.Diagnostics) > 0 {
+				t.Fatal(related.Diagnostics)
+			}
 			priority := "high"
-			opts := UpdateOptions{Changes: ticket.Changes{Priority: &priority, LabelsSet: true, Labels: []string{"new"}}}
+			opts := UpdateOptions{Changes: ticket.Changes{Priority: &priority, LabelsSet: true, Labels: []string{"new"},
+				Parent: &related.Ticket.ID, AddDependencies: []string{related.Ticket.ID}, Fields: customFields(t, "new=!tag [&loop [*loop], !!int 123456789012345678901234567890]")}}
 			m := updateWithOptions(root, testID, opts, &hooks{at: func(p string) error {
 				if p != point {
 					return nil
