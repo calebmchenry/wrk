@@ -2,12 +2,14 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"mime"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -16,7 +18,7 @@ import (
 	"wrk/internal/ticket"
 )
 
-//go:embed assets/index.html assets/app.js assets/model.mjs assets/style.css
+//go:embed assets/index.html assets/app.js assets/model.mjs assets/live.mjs assets/style.css
 var assets embed.FS
 
 type response struct {
@@ -114,13 +116,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, &h.root, "NOT_FOUND", "unknown route or invalid item ID")
 		return
 	}
-	if file, ok := map[string]string{"/": "index.html", "/app.js": "app.js", "/model.mjs": "model.mjs", "/style.css": "style.css"}[r.URL.Path]; ok {
+	if file, ok := map[string]string{"/": "index.html", "/app.js": "app.js", "/model.mjs": "model.mjs", "/live.mjs": "live.mjs", "/style.css": "style.css"}[r.URL.Path]; ok {
 		if r.URL.RawQuery != "" {
 			fail(w, 400, &h.root, "BAD_REQUEST", "this route does not accept query parameters")
 			return
 		}
 		data, _ := assets.ReadFile("assets/" + file)
-		contentType := map[string]string{"index.html": "text/html; charset=utf-8", "app.js": "text/javascript; charset=utf-8", "model.mjs": "text/javascript; charset=utf-8", "style.css": "text/css; charset=utf-8"}[file]
+		contentType := map[string]string{"index.html": "text/html; charset=utf-8", "app.js": "text/javascript; charset=utf-8", "model.mjs": "text/javascript; charset=utf-8", "live.mjs": "text/javascript; charset=utf-8", "style.css": "text/css; charset=utf-8"}[file]
 		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Content-Length", fmt.Sprint(len(data)))
 		if r.Method != http.MethodHead {
@@ -135,7 +137,14 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, &h.root, "NOT_FOUND", "unknown route or invalid item ID")
 		return
 	}
-	filters, err := parseFilters(r.URL, path == "/api/items")
+	var filters listFilters
+	var selected string
+	var err error
+	if path == "/api/workspace" {
+		selected, err = parseSelection(r.URL)
+	} else {
+		filters, err = parseFilters(r.URL, path == "/api/items")
+	}
 	if err != nil {
 		fail(w, 400, &h.root, "BAD_REQUEST", err.Error())
 		return
@@ -163,11 +172,27 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/api/project":
 		reply(w, 200, &h.root, projectInfo(s), nil)
 	case path == "/api/workspace":
+		// Always load and validate before checking the validator. Only ticket and
+		// config bytes contribute, never timestamps, locks, or staging files.
+		etag := workspaceTag(s, selected)
+		w.Header().Set("ETag", etag)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		var detail any
+		if t := s.ByID[selected]; t != nil {
+			detail, err = itemDetail(s, t)
+			if err != nil {
+				fail(w, 500, &h.root, "RENDER", "unable to render item description")
+				return
+			}
+		}
 		items := []workspaceItem{}
 		for _, summary := range s.List(true, false) {
 			items = append(items, workspaceItem{Summary: summary, Body: string(s.ByID[summary.ID].Body)})
 		}
-		reply(w, 200, &h.root, map[string]any{"project": projectInfo(s), "tickets": items}, nil)
+		reply(w, 200, &h.root, map[string]any{"project": projectInfo(s), "tickets": items, "selected": selected, "detail": detail}, nil)
 	case path == "/api/items":
 		if filters.under != nil && s.ByID[*filters.under] == nil {
 			fail(w, 404, &h.root, "NOT_FOUND", "scope root not found in this project")
@@ -180,33 +205,72 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fail(w, 404, &h.root, "NOT_FOUND", "ticket not found in this project")
 			return
 		}
-		bodyHTML, err := renderMarkdown(t.Body)
+		detail, err := itemDetail(s, t)
 		if err != nil {
 			fail(w, 500, &h.root, "RENDER", "unable to render item description")
 			return
 		}
-		dependencies, dependents := []project.Summary{}, []project.Summary{}
-		var parent *project.Summary
-		if t.Parent != nil {
-			p := s.Summary(s.ByID[*t.Parent])
-			parent = &p
+		reply(w, 200, &h.root, detail, nil)
+	}
+}
+
+// A missing selected ticket is a successful snapshot with a null detail, so
+// deletion does not prevent the rest of the workspace from refreshing.
+func parseSelection(u *url.URL) (string, error) {
+	q, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return "", fmt.Errorf("invalid query: %w", err)
+	}
+	for name, values := range q {
+		if name != "selected" || len(values) != 1 || !ticket.IDPattern.MatchString(values[0]) {
+			return "", fmt.Errorf("workspace accepts only one selected ticket ID")
 		}
-		for _, dep := range s.Summary(t).DependsOn {
-			dependencies = append(dependencies, s.Summary(s.ByID[dep]))
-		}
-		for _, other := range s.List(true, false) {
-			for _, dep := range other.DependsOn {
-				if dep == id {
-					dependents = append(dependents, other)
-				}
+	}
+	return q.Get("selected"), nil
+}
+
+func workspaceTag(s *project.Snapshot, selected string) string {
+	hash := sha256.New()
+	fmt.Fprintf(hash, "%d:%s", len(selected), selected)
+	paths := make([]string, 0, len(s.Files))
+	for path := range s.Files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		data := s.Files[path].Data
+		fmt.Fprintf(hash, "%d:%s%d:", len(path), path, len(data))
+		_, _ = hash.Write(data)
+	}
+	return fmt.Sprintf(`"%x"`, hash.Sum(nil))
+}
+
+func itemDetail(s *project.Snapshot, t *ticket.Ticket) (any, error) {
+	bodyHTML, err := renderMarkdown(t.Body)
+	if err != nil {
+		return nil, err
+	}
+	dependencies, dependents := []project.Summary{}, []project.Summary{}
+	var parent *project.Summary
+	if t.Parent != nil {
+		p := s.Summary(s.ByID[*t.Parent])
+		parent = &p
+	}
+	for _, dep := range s.Summary(t).DependsOn {
+		dependencies = append(dependencies, s.Summary(s.ByID[dep]))
+	}
+	for _, other := range s.List(true, false) {
+		for _, dep := range other.DependsOn {
+			if dep == t.ID {
+				dependents = append(dependents, other)
 			}
 		}
-		reply(w, 200, &h.root, map[string]any{
-			"ticket": s.Summary(t), "body": string(t.Body), "body_html": bodyHTML,
-			"source": string(t.Source), "metadata": string(t.Source[:len(t.Source)-len(t.Body)]),
-			"parent": parent, "children": s.Children(id), "dependencies": dependencies, "dependents": dependents,
-		}, nil)
 	}
+	return map[string]any{
+		"ticket": s.Summary(t), "body": string(t.Body), "body_html": bodyHTML,
+		"source": string(t.Source), "metadata": string(t.Source[:len(t.Source)-len(t.Body)]),
+		"parent": parent, "children": s.Children(t.ID), "dependencies": dependencies, "dependents": dependents,
+	}, nil
 }
 
 type workspaceItem struct {

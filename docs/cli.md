@@ -105,9 +105,10 @@ project root are printed after a successful listen.
 The executable embeds the HTML, CSS, and JavaScript; it needs no CDN, Node,
 frontend server, external fonts, or separate asset installation. The workspace
 provides body/title/ID search, intersecting views/labels/parent focus, and item
-details with safe Markdown and relationship navigation. Manual reload picks up
-external changes and displays validation diagnostics. Automatic live refresh
-and browser editing remain separate tickets. See [browser behavior](browser.md).
+details with safe Markdown and relationship navigation. Automatic polling picks
+up external changes and displays validation/reconnection state; retained data
+is explicitly marked stale during failures. Browser editing remains a separate
+ticket. See [browser behavior](browser.md#live-updates-and-recovery).
 
 `--open` runs `open <url>` on macOS or `xdg-open <url>` on Linux, after listening,
 without a shell. It is opt-in and has a three-second timeout. A launch failure
@@ -117,8 +118,8 @@ manually. The launcher returning successfully does not prove a browser displayed
 Ctrl-C and SIGTERM cancel handlers and stop accepting connections. Shutdown allows
 up to three seconds to drain and then closes remaining connections. A normal stop
 exits 0; a listen/server/shutdown/output error exits 1. SIGKILL or failed output
-cannot guarantee a terminal event. No stream endpoint is implemented yet; future
-streams must observe the request context and avoid hijacking connections.
+cannot guarantee a terminal event. Live updates use ordinary conditional reads;
+there are no streaming connections or event histories to drain.
 
 ### Serve output
 
@@ -162,7 +163,7 @@ is allowed. OPTIONS/preflight is not enabled.
 | Route | Successful `result` |
 | --- | --- |
 | `/api/project` | `ticket_count`, `config` (`version`, `prefix`, `defaults.priority`, `defaults.labels`, `fields` definitions), ordered `statuses` and `priorities`. Each field definition has `type`, `description`, `options`. |
-| `/api/workspace` | `project` (the `/api/project` result) and all `tickets` (summaries plus exact UTF-8 `body`), from one validated load. Used for browser search/filtering, including closed items. |
+| `/api/workspace` | `project` (the `/api/project` result), all `tickets` (summaries plus exact UTF-8 `body`), `selected` (requested ID or empty string), and `detail` (the item endpoint result or null), from one validated load. Optional `selected=<id>` includes that detail; a missing selected item returns null without failing the workspace. |
 | `/api/items` | `tickets`, using the CLI summary contract including source revision, parent, dependencies, labels, effective priority, and derived blockers. Defaults to active items. |
 | `/api/items/<id>` | `ticket` summary, exact UTF-8 `body` and full `source`, original `metadata` (source before body, including delimiters), safe `body_html`, nullable `parent` summary, and `children`, `dependencies`, and reverse `dependents` summary arrays. |
 
@@ -172,21 +173,34 @@ and descendant semantics. All/ready cannot both be true. Unknown parameters,
 repeated scalars, malformed encoding, and invalid values return 400; missing
 items/scope roots return 404. IDs must match the existing ID grammar. Roots,
 config paths, and arbitrary file paths cannot be supplied in requests.
-Project, workspace, and item routes accept no query parameters. Workspace does
-not alter the existing list API's CLI-compatible defaults and filter semantics.
+Project and item routes accept no query parameters. Workspace accepts only one
+optional `selected` value matching the ticket ID grammar; empty, repeated, or
+unknown parameters return 400. Workspace does not alter the existing list API's
+CLI-compatible defaults and filter semantics.
+
+Workspace 200 responses include an opaque `ETag` covering the selected ID and
+all current config/ticket paths and exact bytes. Send that exact tag in
+`If-None-Match` to receive 304 with no body if unchanged. Other validator forms
+fall back to a full 200. Validation and request guards always run before 304:
+invalid projects still return 503 and no healthy validator. Workspace validators
+are not item revisions and must never be used for stale-save protection. The
+browser retains only its current snapshot/validator in memory, fetches again
+750 ms after each completed read, and forces a full read after errors/resume.
+There is no server snapshot cache or filesystem-event backlog.
 
 HTTP JSON uses `{schema_version: 1, ok, project_root, result, errors}`. Successful
 errors arrays are empty; failed results are null with actionable shared diagnostics
 (code/message and path/field/line/IDs when available). Each read freshly loads and
 validates the whole project. Any invalid file/config/reference makes the read fail
 with 503, even when the requested item is valid. No partial success or stale healthy
-snapshot is returned. After external repair, another request/reload can succeed.
+snapshot is returned. The browser may retain its previous snapshot with an explicit
+stale label, and polls automatically for recovery after external repair.
 Reads are independent filesystem snapshots, with the same external-editor/Git
 boundary as CLI reads; multiple requests are not a transaction. Item revisions
 cover exact source bytes as described in [storage](storage.md#item-revisions-and-stale-edits).
 Arbitrary custom YAML values remain in `source`, without lossy JSON coercion.
 
-Only `/`, `/app.js`, `/model.mjs`, and `/style.css` serve assets, from the embedded filesystem.
+Only `/`, `/app.js`, `/model.mjs`, `/live.mjs`, and `/style.css` serve assets, from the embedded filesystem.
 No directory listing, project-file serving, clean-path redirects, or SPA fallback
 is provided. Assets and APIs use `Cache-Control: no-store`, `nosniff`, no-referrer,
 frame denial, and a self-only Content Security Policy without inline script access.
@@ -213,9 +227,9 @@ phases; individual YAML parsing/graph operations and filesystem syscalls are not
 preemptible. Avoid unstable directory aliases or nonlocal filesystems.
 
 For runtime diagnostics, inspect the named file and `wrk validate`; restore a
-known-good file or obtain authorized repair, then reload. For 403, use the exact
+known-good file or obtain authorized repair; browser recovery is automatic. For 403, use the exact
 printed URL. For `LISTEN`, stop the conflicting process or choose another port.
-Automatic recovery/reconnect display will be expanded with live updates.
+See [live update and reconnect behavior](browser.md#live-updates-and-recovery).
 
 ## Version and upgrade
 

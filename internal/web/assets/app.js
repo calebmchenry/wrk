@@ -1,4 +1,5 @@
 import { readState, stateHash, filterKey, indexItems, selectItems, progress } from './model.mjs';
+import { createPoller, drafts } from './live.mjs';
 
 const $ = selector => document.querySelector(selector);
 const el = (tag, className, text) => {
@@ -11,11 +12,12 @@ const names = { todo: 'Todo', 'in-progress': 'In progress', blocked: 'Manually b
 const help = { active: 'Todo, in progress, and manually blocked.', all: 'Every status, including done and canceled.', ready: 'Todo with every dependency done.', blocked: 'Explicitly blocked status, independent of dependencies.' };
 let state = readState(location.hash);
 let index = null;
-let detailRequest;
-let projectRequest;
-let detailVersion = 0;
+let snapshot = null;
 let lastSelected = '';
-let loading = false;
+let stale = false;
+let detailFocus = false;
+let detailScroll = history.state?.detailScroll || 0;
+let renderedDetail = '';
 
 function badge(status) { return el('span', `badge status-${status}`, names[status] || status); }
 function itemHref(id) { return stateHash({ ...state, item: id }); }
@@ -48,8 +50,16 @@ function syncState(focus = false) {
   if (index && filterKey(previous) !== filterKey(state)) renderList();
   updateLinks();
   $('#list-scroll').scrollTop = scroll.listScroll || 0;
-  if (previous.item !== state.item) renderDetail(focus, scroll.detailScroll || 0);
-  else $('#detail').scrollTop = scroll.detailScroll || 0;
+  if (previous.item !== state.item) {
+    detailFocus = focus;
+    detailScroll = scroll.detailScroll || 0;
+    renderDetail();
+    poller.refresh();
+  } else {
+    renderDetail();
+    $('#detail').scrollTop = scroll.detailScroll || 0;
+  }
+  updateDraft();
   if (!state.item && focus && lastSelected) {
     const link = [...$('#items').querySelectorAll('a')].find(a => a.dataset.item === lastSelected);
     (link || $('#search')).focus({ preventScroll: true });
@@ -113,7 +123,7 @@ function renderList() {
   if (!items.length) {
     const missing = state.focus && !index.byID.has(state.focus);
     $('#empty').append(el('h2', '', missing ? 'Focus item not found' : index.items.length ? 'No matching items' : 'No items yet'),
-      el('p', '', missing ? `${state.focus} is not in this project. Choose another parent focus or reset filters.` : index.items.length ? 'Try another search, clear labels, or choose All to include done and canceled work.' : 'Create your first item with wrk new "Title", then reload.'));
+      el('p', '', missing ? `${state.focus} is not in this project. Choose another parent focus or reset filters.` : index.items.length ? 'Try another search, clear labels, or choose All to include done and canceled work.' : 'Create your first item with wrk new "Title", and it will appear automatically.'));
   }
   updateLinks();
 }
@@ -150,60 +160,71 @@ function detailShell() {
   back.type = 'button';
   back.addEventListener('click', () => navigate({ ...state, item: '' }, { focus: true }));
   top.append(back, el('span', 'item-id', state.item));
-  $('#detail').replaceChildren(top);
+  $('#detail-content').replaceChildren(top);
 }
-async function request(path, signal) {
-  const response = await fetch(path, { cache: 'no-store', signal });
-  const data = await response.json();
-  if (!response.ok || !data.ok) {
-    const error = new Error(data.errors.map(d => `${d.code}: ${d.path || ''}${d.field ? ` [${d.field}]` : ''}${d.line ? `:${d.line}` : ''} ${d.message}`).join('\n'));
-    error.status = response.status;
-    if (data.project_root) $('#project').textContent = data.project_root;
-    throw error;
-  }
-  return data;
+function updateDraft() {
+  const context = drafts.inspect(index, new Set(index ? selectItems(index, state).map(item => item.id) : []), stale);
+  const notice = $('#draft-notice');
+  notice.hidden = !context?.dirty;
+  if (!context?.dirty) return;
+  notice.textContent = `Unsaved draft for ${context.id} is preserved. ` +
+    (context.stale ? 'Project data is stale; reconnect or repair the named files before saving.' :
+      context.missing ? 'This item was removed. Review the draft before discarding it.' :
+        context.changed ? 'This item changed externally. Review the current version before saving.' : '') +
+    (context.outsideFilters ? ' The item is outside the current list filters.' : '');
 }
 function showProblem(error) {
-  index = null;
-  detailVersion++;
-  detailRequest?.abort();
-  $('#workspace').hidden = true;
+  stale = true;
+  $('#workspace').hidden = !index;
   $('#problem').hidden = false;
   $('#diagnostics').textContent = error.message;
-  $('#status').textContent = error.status ? 'Project needs attention' : 'Unable to reach wrk — check the server, then reload';
+  $('#status').textContent = (error.status ? 'Project needs attention — retrying automatically' : 'Reconnecting to wrk…') +
+    (index ? ' · Showing stale last-valid data' : ' · No valid snapshot available');
+  $('.connection').dataset.state = 'stale';
+  updateDraft();
 }
-async function renderDetail(focus = false, scroll = 0) {
-  detailRequest?.abort();
-  const version = ++detailVersion;
+function renderDetail() {
   const selected = state.item;
   $('#workspace').classList.toggle('has-selection', Boolean(selected));
+  // Skip unchanged detail DOM, preserving disclosure, keyboard and scroll state.
+  const detail = snapshot?.result.selected === selected ? snapshot.result.detail : null;
+  const outside = index && !selectItems(index, state).some(t => t.id === selected);
+  const pending = selected && index?.byID.has(selected) && snapshot?.result.selected !== selected;
+  const key = JSON.stringify([selected, detail, outside, pending]);
+  if (key === renderedDetail) return;
+  renderedDetail = key;
+  const scroll = detailScroll ?? $('#detail').scrollTop;
+  const disclosures = [...$('#detail-content').querySelectorAll('details')].map(node => node.open);
+  $('#detail').setAttribute('aria-busy', String(Boolean(pending)));
   if (!selected) {
-    $('#detail').replaceChildren(el('div', 'empty detail-placeholder', 'Select an item to explore its description and connections.'));
+    $('#detail-content').replaceChildren(el('div', 'empty detail-placeholder', 'Select an item to explore its description and connections.'));
+    detailFocus = false;
+    detailScroll = null;
     return;
   }
-  if (!index || loading) return;
   lastSelected = selected;
   detailShell();
-  $('#detail').append(el('p', 'empty', 'Loading item…'));
-  $('#detail').setAttribute('aria-busy', 'true');
-  detailRequest = new AbortController();
-  try {
-    const data = await request(`/api/items/${encodeURIComponent(selected)}`, AbortSignal.any([detailRequest.signal, AbortSignal.timeout(20000)]));
-    if (version !== detailVersion) return;
-    const item = data.result.ticket;
-    detailShell();
+  if (pending) {
+    $('#detail-content').append(el('p', 'empty', 'Loading item…'));
+    return;
+  }
+  if (!detail) {
+    $('#detail-content').append(el('h2', 'detail-title', 'Item not found'), el('p', '', `${selected} is not in this project. It may have been removed. Your selection and any draft are preserved.`));
+  } else {
+    const data = { result: detail };
+    const item = detail.ticket;
     const title = el('h2', 'detail-title', item.title);
     const badges = el('div', 'badges');
     badges.append(badge(item.status), el('span', `badge priority-${item.priority}`, `${item.priority} priority`));
     for (const label of item.labels) badges.append(el('span', 'badge', label));
-    $('#detail').append(title, badges);
-    if (item.status === 'blocked') $('#detail').append(el('p', 'blockers', 'Manually blocked. This status stays explicit even when dependencies finish.'));
-    if (item.blockers.length) $('#detail').append(el('p', 'blockers', `Unfinished dependencies: ${item.blockers.map(b => `${b.id} (${b.status})`).join(', ')}`));
-    if (!selectItems(index, state).some(t => t.id === selected)) $('#detail').append(el('p', 'hint', 'This item is outside the current list filters. Your filters are preserved.'));
+    $('#detail-content').append(title, badges);
+    if (item.status === 'blocked') $('#detail-content').append(el('p', 'blockers', 'Manually blocked. This status stays explicit even when dependencies finish.'));
+    if (item.blockers.length) $('#detail-content').append(el('p', 'blockers', `Unfinished dependencies: ${item.blockers.map(b => `${b.id} (${b.status})`).join(', ')}`));
+    if (!selectItems(index, state).some(t => t.id === selected)) $('#detail-content').append(el('p', 'hint', 'This item is outside the current list filters. Your filters are preserved.'));
     const focusButton = el('button', 'focus-button', 'Focus this item + descendants');
     focusButton.type = 'button';
     focusButton.addEventListener('click', () => navigate({ ...state, focus: selected }));
-    $('#detail').append(focusButton);
+    $('#detail-content').append(focusButton);
     const description = section('Description');
     const markdown = el('div', 'markdown');
     // This is the only HTML sink: the server's restricted Goldmark renderer owns
@@ -215,70 +236,109 @@ async function renderDetail(focus = false, scroll = 0) {
     metadata.append(el('summary', '', 'Custom fields & original metadata (YAML)'), el('pre', '', data.result.metadata));
     const source = el('details', 'detail-section');
     source.append(el('summary', '', 'Original Markdown source'), el('pre', '', data.result.body));
-    $('#detail').append(description,
+    $('#detail-content').append(description,
       relationships('Parent', data.result.parent ? [data.result.parent] : []),
       relationships('Children', data.result.children, `${progress(data.result.children)} · Direct children only; parent status stays explicit.`),
       relationships('Dependencies', data.result.dependencies, 'Only done dependencies satisfy readiness; canceled dependencies still block.'),
       relationships('Dependents', data.result.dependents, 'Items that depend on this one.'), metadata, source);
     updateLinks();
-  } catch (error) {
-    if (version !== detailVersion) return;
-    if (error.status === 404) {
-      detailShell();
-      $('#detail').append(el('h2', 'detail-title', 'Item not found'), el('p', '', `${selected} is not in this project. It may have been removed. Select another item or reload.`));
-    } else {
-      showProblem(error);
-    }
-  } finally {
-    if (version === detailVersion) {
-      $('#detail').setAttribute('aria-busy', 'false');
-      $('#detail').scrollTop = scroll;
-      if (focus) $('#detail').focus({ preventScroll: true });
-    }
   }
+  [...$('#detail-content').querySelectorAll('details')].forEach((node, i) => { node.open = disclosures[i] || false; });
+  $('#detail').scrollTop = scroll;
+  if (detailFocus) $('#detail').focus({ preventScroll: true });
+  detailFocus = false;
+  detailScroll = null;
 }
-async function loadProject() {
-  projectRequest?.abort();
-  projectRequest = new AbortController();
-  const controller = projectRequest;
-  detailRequest?.abort();
-  detailVersion++;
-  loading = true;
-  const scroll = { list: $('#list-scroll').scrollTop, detail: $('#detail').scrollTop };
-  $('#reload').disabled = true;
+function applySnapshot(data) {
+  const changed = Boolean(data);
+  if (data) snapshot = data;
+  if (!snapshot) throw new Error('Missing current snapshot; retrying');
+  stale = false;
   $('#problem').hidden = true;
-  $('#workspace').hidden = true;
-  $('#workspace').setAttribute('aria-busy', 'true');
-  $('#status').textContent = 'Loading project…';
-  try {
-    const data = await request('/api/workspace', AbortSignal.any([controller.signal, AbortSignal.timeout(20000)]));
-    if (controller !== projectRequest) return;
-    index = indexItems(data.result.tickets);
-    $('#project').textContent = data.project_root;
-    $('#project-name').textContent = data.project_root.split('/').filter(Boolean).pop() || data.result.project.config.prefix;
+  $('.connection').dataset.state = 'live';
+  $('#workspace').hidden = false;
+  if (changed) {
+    // Capture context when the response arrives, not when the request started:
+    // people may scroll, type, or change filters while a read is in flight.
+    const scroll = $('#list-scroll').scrollTop;
+    const filterScroll = $('.filters').scrollTop;
+    const labelScroll = $('#label-options').scrollTop;
+    const focusDetail = detailFocus;
+    const active = document.activeElement;
+    const activeItem = active?.dataset.item;
+    const activeLabel = active?.closest('#label-options') ? active.value : null;
+    index = indexItems(snapshot.result.tickets);
+    $('#project').textContent = snapshot.project_root;
+    $('#project-name').textContent = snapshot.project_root.split('/').filter(Boolean).pop() || snapshot.result.project.config.prefix;
     document.title = `${$('#project-name').textContent} · wrk`;
-    $('#status').textContent = `${index.items.length} items · ${data.result.project.config.prefix} · Stored in .wrk`;
-    $('#workspace').hidden = false;
     buildFilters();
     renderList();
-    $('#list-scroll').scrollTop = scroll.list;
-    loading = false;
-    await renderDetail(false, scroll.detail);
-  } catch (error) {
-    if (controller === projectRequest) showProblem(error);
-  } finally {
-    if (controller === projectRequest) {
-      loading = false;
-      $('#reload').disabled = false;
-      $('#workspace').setAttribute('aria-busy', 'false');
+    renderDetail();
+    $('#list-scroll').scrollTop = scroll;
+    $('.filters').scrollTop = filterScroll;
+    $('#label-options').scrollTop = labelScroll;
+    if (!focusDetail && activeItem && !active.isConnected) [...$('#items').querySelectorAll('a')].find(node => node.dataset.item === activeItem)?.focus({ preventScroll: true });
+    if (!focusDetail && activeLabel !== null) [...$('#label-options').querySelectorAll('input')].find(node => node.value === activeLabel)?.focus({ preventScroll: true });
+  }
+  $('#status').textContent = `Live · ${index.items.length} items · ${snapshot.result.project.config.prefix} · Stored in .wrk`;
+  $('#reload').disabled = false;
+  $('#workspace').setAttribute('aria-busy', 'false');
+  updateDraft();
+}
+const poller = createPoller({
+  async read({ signal, etag }) {
+    const selected = /^[a-z][a-z0-9]{0,15}-[a-f0-9]{8}$/.test(state.item) ? state.item : '';
+    const path = '/api/workspace' + (selected ? `?selected=${encodeURIComponent(selected)}` : '');
+    const response = await fetch(path, { cache: 'no-store', signal: AbortSignal.any([signal, AbortSignal.timeout(20000)]),
+      headers: etag ? { 'If-None-Match': etag } : {} });
+    if (response.status === 304 && etag) return { data: null, etag };
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      const error = new Error(data.errors.map(d => `${d.code}: ${d.path || ''}${d.field ? ` [${d.field}]` : ''}${d.line ? `:${d.line}` : ''} ${d.message}`).join('\n'));
+      error.status = response.status;
+      throw error;
     }
+    return { data, etag: response.headers.get('ETag') };
+  },
+  onData: applySnapshot,
+  onChecking(force) {
+    if (force && index) {
+      stale = true;
+      $('.connection').dataset.state = 'stale';
+      $('#status').textContent = 'Checking for updates · Retained data is stale until checked';
+      updateDraft();
+    }
+  },
+  onError(error) {
+    showProblem(error);
+    $('#reload').disabled = false;
+    $('#workspace').setAttribute('aria-busy', 'false');
+  },
+});
+// Background throttling and BFCache can suspend timers. Each resume signal
+// abandons obsolete requests and resynchronizes with a full current snapshot.
+for (const event of ['online', 'focus']) window.addEventListener(event, () => {
+  if (document.visibilityState === 'visible') poller.refresh();
+});
+window.addEventListener('pageshow', event => { if (event.persisted && document.visibilityState === 'visible') poller.refresh(); });
+window.addEventListener('offline', () => showProblem(new Error('Connection interrupted; retrying automatically.')));
+window.addEventListener('pagehide', () => poller.stop());
+function syncVisibility() {
+  if (document.visibilityState === 'visible') poller.refresh();
+  else {
+    poller.stop();
+    stale = true;
+    $('.connection').dataset.state = 'stale';
+    $('#status').textContent = 'Updates paused while hidden · ' + (index ? 'Showing stale last-valid data' : 'No valid snapshot loaded');
+    updateDraft();
   }
 }
+document.addEventListener('visibilitychange', syncVisibility);
 $('#search').addEventListener('input', () => navigate({ ...state, q: $('#search').value }, { replace: true }));
 for (const button of document.querySelectorAll('[data-view]')) button.addEventListener('click', () => navigate({ ...state, view: button.dataset.view }));
 $('#focus').addEventListener('change', () => navigate({ ...state, focus: $('#focus').value }));
 $('#reset').addEventListener('click', () => navigate({ ...readState(''), item: state.item }));
-$('#reload').addEventListener('click', loadProject);
+$('#reload').addEventListener('click', () => poller.refresh());
 $('.skip-link').addEventListener('click', event => {
   event.preventDefault();
   (state.item ? $('#detail') : $('#list-scroll')).focus({ preventScroll: true });
@@ -290,4 +350,6 @@ document.addEventListener('click', event => {
   navigate({ ...state, item: link.dataset.item }, { focus: true });
 });
 renderControls();
-loadProject();
+$('#reload').disabled = true;
+if (document.visibilityState === 'hidden') syncVisibility();
+else poller.refresh();

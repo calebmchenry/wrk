@@ -102,3 +102,8 @@ pre code { background: transparent; padding: 0; }
   .section-heading { margin-bottom: 10px; }
   .detail-title { font-size: 27px; }
 }
+
+.connection[data-state=stale] { color: #864426; background: #fff3e8; }
+.connection:not([data-state=live]) .connection-dot { background: #b16d3a; }
+#draft-notice { margin: 0; padding: 12px 32px; color: #704624; background: #fff3dc; border-bottom: 1px solid #e7c58a; }
+#problem { max-height: 30vh; flex-shrink: 0; overflow: auto; }

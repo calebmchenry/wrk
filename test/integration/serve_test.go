@@ -256,6 +256,10 @@ func TestPackagedBinaryServesEmbeddedAssets(t *testing.T) {
 	if !bytes.Contains(module, []byte("export function selectItems")) {
 		t.Fatal("missing browser model module")
 	}
+	live := getServe(t, p.url+"live.mjs", 200)
+	if !bytes.Contains(live, []byte("export function createPoller")) {
+		t.Fatal("missing browser live module")
+	}
 	if !bytes.Contains(html, []byte("Local workspace")) {
 		t.Fatal(string(html))
 	}

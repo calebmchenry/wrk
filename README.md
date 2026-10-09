@@ -254,8 +254,10 @@ Browse a searchable list and item detail pane with Markdown descriptions,
 statuses, priority, labels, hierarchy, dependencies, and custom values. Search
 matches title, ID, and body. Active, All, Ready, and manually Blocked views
 intersect with exact label filters and a parent focus. Selection and filters
-survive links and browser navigation. Use **Reload project** to pick up CLI/agent
-changes; automatic live updates and browser editing are subsequent work.
+survive links and browser navigation. CLI/agent changes appear automatically
+through polling, normally within two seconds. Connection and validation failures
+mark retained data as stale and recover automatically. **Reload project** forces
+an immediate refresh. Browser editing remains subsequent work.
 
 Parent focus includes the selected root and all descendants before other
 filters apply; CLI `list --under` excludes the root. Markdown images appear as

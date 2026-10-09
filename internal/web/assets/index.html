@@ -14,8 +14,9 @@
     <div class="project-heading"><p class="eyebrow">LOCAL WORKSPACE</p><h1 id="project-name">Your project</h1><p id="project" class="path">Connecting…</p></div>
     <button id="reload" type="button">Reload project</button>
   </header>
-  <div class="connection"><span class="connection-dot" aria-hidden="true"></span><span id="status" role="status">Loading project…</span><span class="manual-note">Manual refresh</span></div>
-  <section id="problem" role="alert" hidden><h2>Project needs attention</h2><pre id="diagnostics"></pre><p>Check the named files with <code>wrk validate</code>, then reload the project.</p></section>
+  <div class="connection" data-state="connecting"><span class="connection-dot" aria-hidden="true"></span><span id="status" role="status">Loading project…</span><span class="manual-note">Automatic updates</span></div>
+  <section id="problem" role="alert" hidden><h2>Project needs attention</h2><pre id="diagnostics"></pre><p>Check the named files with <code>wrk validate</code>. Updates resume automatically after repair.</p></section>
+  <p id="draft-notice" role="status" hidden></p>
   <main id="workspace" aria-busy="true">
     <aside id="browse" aria-label="Browse items">
       <div class="filters">
@@ -32,7 +33,7 @@
       <p id="results" role="status">Loading items…</p>
       <div id="list-scroll" tabindex="0" aria-label="Item list"><ul id="items"></ul><div id="empty" class="empty" hidden></div></div>
     </aside>
-    <section id="detail" tabindex="-1" aria-label="Item detail"><div class="empty detail-placeholder"><span class="empty-symbol" aria-hidden="true">↗</span><h2>Select an item</h2><p>Keep the work in view.<br>Choose an item to explore its description and connections.</p></div></section>
+    <section id="detail" tabindex="-1" aria-label="Item detail"><div id="detail-content"><div class="empty detail-placeholder"><span class="empty-symbol" aria-hidden="true">↗</span><h2>Select an item</h2><p>Keep the work in view.<br>Choose an item to explore its description and connections.</p></div></div><div id="draft"></div></section>
   </main>
   <noscript>This workspace needs JavaScript. You can also browse with wrk list and wrk show.</noscript>
 </body>
