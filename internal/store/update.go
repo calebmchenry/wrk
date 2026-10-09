@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"wrk/internal/diagnostic"
@@ -28,6 +29,9 @@ type UpdateEntry struct {
 type UpdateOptions struct {
 	ticket.Changes
 	Recursive bool
+	// ExpectedRevision requires a current single-item source revision, even for no-ops.
+	// Nil opts out; a supplied empty revision never matches a ticket.
+	ExpectedRevision *string
 }
 
 func operationError(err error, path string, committed bool) diagnostic.Diagnostic {
@@ -46,7 +50,7 @@ func operationError(err error, path string, committed bool) diagnostic.Diagnosti
 	}
 	return diagnostic.New(code, err.Error(), path)
 }
-func withLock(root string, fn func(*project.Snapshot) Mutation) (result Mutation) {
+func withLock(root string, precondition func(*project.Snapshot) []diagnostic.Diagnostic, fn func(*project.Snapshot) Mutation) (result Mutation) {
 	result.Diagnostics = []diagnostic.Diagnostic{}
 	lock, err := Acquire(filepath.Join(root, ".wrk"))
 	if err != nil {
@@ -59,6 +63,14 @@ func withLock(root string, fn func(*project.Snapshot) Mutation) (result Mutation
 		}
 	}()
 	s := project.Load(root)
+	// Check against the locked read before general diagnostics so deletion or an
+	// invalid external rewrite still reports a recognizable stale-edit failure.
+	if precondition != nil {
+		if ds := precondition(s); len(ds) > 0 {
+			result.Diagnostics = ds
+			return
+		}
+	}
 	if len(s.Diagnostics) > 0 {
 		result.Diagnostics = s.Diagnostics
 		return
@@ -79,12 +91,21 @@ func UpdateWithOptions(root, id string, opts UpdateOptions) Mutation {
 
 func updateWithOptions(root, id string, opts UpdateOptions, h *hooks) Mutation {
 	if err := opts.Changes.Validate(); err != nil {
-		return Mutation{Diagnostics: []diagnostic.Diagnostic{diagnostic.New("USAGE", err.Error(), "")}}
+		code := "USAGE"
+		if errors.Is(err, ticket.ErrInvalidBody) {
+			code = "INVALID_BODY"
+		}
+		return Mutation{Diagnostics: []diagnostic.Diagnostic{diagnostic.New(code, err.Error(), "")}}
 	}
 	if opts.Recursive && opts.Changes.HasNonLabelChanges() {
 		return Mutation{Diagnostics: []diagnostic.Diagnostic{diagnostic.New("USAGE", "--recursive permits only label changes", "")}}
 	}
-	return withLock(root, func(s *project.Snapshot) (result Mutation) {
+	if opts.Recursive && opts.ExpectedRevision != nil {
+		return Mutation{Diagnostics: []diagnostic.Diagnostic{diagnostic.New("USAGE", "expected revision is only supported for single-ticket updates", "")}}
+	}
+	return withLock(root, func(s *project.Snapshot) []diagnostic.Diagnostic {
+		return checkRevision(s, id, opts.ExpectedRevision)
+	}, func(s *project.Snapshot) (result Mutation) {
 		result = Mutation{Snapshot: s, Diagnostics: []diagnostic.Diagnostic{}}
 		t := s.ByID[id]
 		if !ticket.IDPattern.MatchString(id) || t == nil {
@@ -200,4 +221,19 @@ func updateWithOptions(root, id string, opts UpdateOptions, h *hooks) Mutation {
 		}
 		return
 	})
+}
+
+func checkRevision(s *project.Snapshot, id string, expected *string) []diagnostic.Diagnostic {
+	if expected == nil {
+		return nil
+	}
+	if !ticket.IDPattern.MatchString(id) || !slices.Contains(s.Names, id+".md") {
+		return []diagnostic.Diagnostic{diagnostic.New("NOT_FOUND", "ticket no longer exists in this project; reload before retrying", "")}
+	}
+	path := ".wrk/" + id + ".md"
+	file, readable := s.Files[path]
+	if !readable || ticket.Revision(file.Data) != *expected {
+		return []diagnostic.Diagnostic{diagnostic.New("CONFLICT", "ticket changed since it was read; reload and review before retrying", path)}
+	}
+	return nil
 }

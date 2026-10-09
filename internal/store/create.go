@@ -28,7 +28,7 @@ func create(root string, options CreateOptions, random io.Reader, h *hooks) Muta
 	if err := ticket.ValidateFields(options.Fields, nil); err != nil {
 		return Mutation{Diagnostics: []diagnostic.Diagnostic{diagnostic.New("USAGE", err.Error(), "")}}
 	}
-	return withLock(root, func(s *project.Snapshot) Mutation {
+	return withLock(root, nil, func(s *project.Snapshot) Mutation {
 		result := Mutation{Snapshot: s, Diagnostics: []diagnostic.Diagnostic{}}
 		for attempt := 0; attempt < 128; attempt++ {
 			token := make([]byte, 4)

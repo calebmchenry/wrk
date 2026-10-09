@@ -2,6 +2,7 @@ package ticket
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"go.yaml.in/yaml/v3"
 	"slices"
@@ -55,8 +56,12 @@ func Equal(a, b *yaml.Node) bool {
 	return equal(a, b)
 }
 
+var ErrInvalidBody = errors.New("body input must be UTF-8")
+
 type Changes struct {
-	Title, Status, Priority             *string
+	Title, Status, Priority *string
+	// Body replaces the exact Markdown bytes; nil preserves, and an empty string clears.
+	Body                                *string
 	AddLabels, RemoveLabels             []string
 	Labels                              []string
 	LabelsSet                           bool
@@ -69,7 +74,10 @@ type Changes struct {
 
 func (c Changes) Validate() error {
 	if !c.HasNonLabelChanges() && !c.LabelsSet && len(c.AddLabels) == 0 && len(c.RemoveLabels) == 0 {
-		return fmt.Errorf("update requires at least one metadata change (see wrk help update)")
+		return fmt.Errorf("update requires at least one body or metadata change (see wrk help update)")
+	}
+	if c.Body != nil && !utf8.ValidString(*c.Body) {
+		return ErrInvalidBody
 	}
 	if c.Parent != nil && c.NoParent {
 		return fmt.Errorf("--parent and --no-parent conflict")
@@ -106,7 +114,7 @@ func (c Changes) Validate() error {
 }
 
 func (c Changes) HasNonLabelChanges() bool {
-	return c.Title != nil || c.Status != nil || c.Priority != nil || c.Parent != nil || c.NoParent ||
+	return c.Body != nil || c.Title != nil || c.Status != nil || c.Priority != nil || c.Parent != nil || c.NoParent ||
 		len(c.AddDependencies) > 0 || len(c.RemoveDependencies) > 0 || len(c.Fields) > 0 || len(c.RemoveFields) > 0
 }
 
@@ -163,7 +171,11 @@ func PatchChanges(t *Ticket, c Changes) ([]byte, bool, error) {
 	if fieldsChanged {
 		changes["fields"] = fields
 	}
-	if len(changes) == 0 {
+	body := t.Body
+	if c.Body != nil {
+		body = []byte(*c.Body)
+	}
+	if len(changes) == 0 && bytes.Equal(body, t.Body) {
 		return bytes.Clone(t.Source), false, nil
 	}
 	for _, key := range []string{"title", "status", "priority", "labels", "parent", "depends_on", "fields"} {
@@ -171,7 +183,7 @@ func PatchChanges(t *Ticket, c Changes) ([]byte, bool, error) {
 			setMapEntry(n, key, v)
 		}
 	}
-	data, err := encode(n, t.Body)
+	data, err := encode(n, body)
 	if err != nil {
 		return nil, false, fmt.Errorf("PRESERVATION_UNSUPPORTED: %w", err)
 	}
@@ -191,7 +203,7 @@ func PatchChanges(t *Ticket, c Changes) ([]byte, bool, error) {
 			return nil, false, fmt.Errorf("PRESERVATION_UNSUPPORTED: %s changed unexpectedly", key)
 		}
 	}
-	if !bytes.Equal(t.Body, after.Body) || wantCount != len(am) {
+	if !bytes.Equal(body, after.Body) || wantCount != len(am) {
 		return nil, false, fmt.Errorf("PRESERVATION_UNSUPPORTED: body or field set changed")
 	}
 	for key, before := range old {

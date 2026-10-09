@@ -14,6 +14,7 @@ type Blocker struct {
 type Summary struct {
 	ID        string    `json:"id"`
 	Path      string    `json:"path"`
+	Revision  string    `json:"revision"`
 	Title     string    `json:"title"`
 	Status    string    `json:"status"`
 	Parent    *string   `json:"parent"`
@@ -28,7 +29,7 @@ func (s *Snapshot) Summary(t *ticket.Ticket) Summary {
 	sort.Strings(deps)
 	labels := append([]string{}, t.Labels...)
 	sort.Strings(labels)
-	return Summary{t.ID, t.Path, t.Title, t.Status, t.Parent, deps, t.Priority, labels, s.Blockers(t)}
+	return Summary{t.ID, t.Path, ticket.Revision(t.Source), t.Title, t.Status, t.Parent, deps, t.Priority, labels, s.Blockers(t)}
 }
 func (s *Snapshot) Blockers(t *ticket.Ticket) []Blocker {
 	out := []Blocker{}

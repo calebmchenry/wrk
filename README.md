@@ -100,13 +100,33 @@ wrk list --all
 wrk validate
 ```
 
-Between CLI updates, edit the Markdown body in `.wrk/<id>.md` directly. Everything
-through the closing `---` is metadata and must be changed through supported CLI
-commands. Metadata updates retain the body byte-for-byte, including whitespace
-and missing final newlines.
+From another directory, select the existing project with `--project directory`
+or `--config directory/.wrk/config.yaml` on `new`, `list`, `show`, `update`, and
+`validate`. Selectors work before or after the command:
+
+```sh
+wrk --project '/path/to/my project' list --ready
+wrk show <id> --config '/path/to/my project/.wrk/config.yaml'
+```
+
+Explicit selection overrides cwd discovery and requires that exact project; it
+never searches ancestors or initializes missing data. Relative selectors and
+`--body-file` paths use the invocation directory. See the
+[project selection contract](docs/cli.md#project-selection) for path and symlink behavior.
+
+Use `update --body-file path|-` to replace a description, optionally with metadata
+changes in the same operation. Empty input clears it; omitted input preserves it.
+Input must be UTF-8 and is read before locking. Repeating the existing body is a
+no-op. Body edits cannot use `--recursive`.
+
+Between CLI updates, you may also edit the Markdown body in `.wrk/<id>.md`
+directly. Everything through the closing `---` is metadata and must be changed
+through supported CLI commands. Metadata updates retain the body byte-for-byte,
+including whitespace and missing final newlines.
 
 ```sh
 printf 'Description from stdin\n' | wrk new "Another task" --body-file - --no-labels
+printf 'Updated description\n' | wrk update <id> --body-file - --status in-progress
 wrk new "Task from a file" --body-file .wrk/config.yaml
 wrk list --json
 ```

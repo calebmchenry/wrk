@@ -105,7 +105,7 @@ func run(args []string, cwd string, in io.Reader, out, errout io.Writer, updater
 		return render(out, errout, r, e, human, code)
 	}
 	var body []byte
-	if r.Command == "new" && r.BodyFile != nil {
+	if r.BodyFile != nil {
 		var err error
 		if *r.BodyFile == "-" {
 			body, err = io.ReadAll(in)
@@ -125,7 +125,7 @@ func run(args []string, cwd string, in io.Reader, out, errout io.Writer, updater
 			return render(out, errout, r, e, "", 1)
 		}
 	}
-	root, ds := project.Discover(cwd)
+	root, ds := project.Resolve(cwd, r.Selection)
 	if root != "" {
 		e.ProjectRoot = &root
 	}
@@ -138,7 +138,7 @@ func run(args []string, cwd string, in io.Reader, out, errout io.Writer, updater
 		return renderMutation(out, errout, r, e, result)
 	}
 	if r.Command == "update" {
-		result := store.UpdateWithOptions(root, r.Args[0], store.UpdateOptions{Changes: r.changes(), Recursive: r.Recursive})
+		result := store.UpdateWithOptions(root, r.Args[0], store.UpdateOptions{Changes: r.changes(body), Recursive: r.Recursive})
 		return renderMutation(out, errout, r, e, result)
 	}
 	s := project.Load(root)

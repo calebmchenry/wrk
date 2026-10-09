@@ -49,10 +49,54 @@ recursive values. This retains aliases of edited scalars, sequences, mappings,
 and custom values without expansion, including aliases used as mapping keys.
 Independent custom-field inputs cannot collide with existing anchor names.
 Reparse output and compare requested values, every unrelated value, and exact
-body bytes. Creation also verifies that encoding preserves the supplied values.
+body bytes (the existing body when omitted, or the explicit UTF-8 replacement).
+Creation also verifies that encoding preserves the supplied values.
 Unknown custom tags and exact numeric scalar text survive; comments, spacing,
 and anchor names are not byte guarantees. Unsupported preservation fails unchanged
 with PRESERVATION_UNSUPPORTED.
+
+## Item revisions and stale edits
+
+`ticket.Revision(source)` returns an opaque token for the exact file bytes read,
+including frontmatter delimiters, comments, formatting, custom values, and body.
+The current encoding is `sha256:` plus the lowercase hexadecimal SHA-256 digest;
+callers should round-trip the token without interpreting it. `Snapshot.Summary`
+includes this revision, so CLI list/show/mutation summaries and future HTTP reads
+use the same definition. Compute it from the source in the read snapshot, never
+from a separately reread file. No revision is stored on disk.
+
+The revision excludes project config, unrelated tickets, derived children/blockers,
+file mode, inode identity, and timestamps. An unrelated edit or a same-byte atomic
+replacement made before a request does not invalidate the draft. Restoring the
+exact original bytes restores its revision: this is a content precondition, not
+an event counter or a record of intervening edits. Config and whole-project
+relationships are still loaded and validated for every write, including no-ops.
+
+`store.UpdateWithOptions` accepts `ExpectedRevision *string` for a single item.
+Nil leaves the existing unconditional update behavior; a supplied empty string
+does not match. After acquiring the writer lock and loading current inputs, check
+the original draft's revision before candidate creation, staging, or no-op return.
+A changed or unreadable target returns `CONFLICT`; an absent target returns
+`NOT_FOUND`. These checks precede general project diagnostics so a deleted target
+with dangling references or a malformed external rewrite still reports a
+recognizable stale-edit failure. A matching revision never bypasses project or
+candidate validation. Recursive label updates reject a revision precondition;
+one root token cannot protect every selected descendant.
+
+On conflict, retain the caller's draft, reload current data, review the differences,
+and explicitly retry using the newly read revision. Never silently replace the
+draft's base token on refresh or automatically retry a stale save. A request that
+already matches the current values still rejects an obsolete revision. Successful
+no-ops keep the same source, inode, and revision. A committed mutation result
+describes its published bytes, including when later sync/cleanup reports an error;
+inspect/resynchronize before retrying an ambiguous result.
+
+After the precondition passes, the existing final snapshot comparison still
+checks **all** validation inputs, including bytes, inventory, identities, and
+modes, before publication. A change during the mutation is rejected even if it
+is unrelated to the draft. Revisions protect the time before the request but do
+not close the accepted external-editor/Git comparison/rename race documented
+above. Reads remain lock-free snapshots and are not multi-file transactions.
 
 
 ## Recursive label publication

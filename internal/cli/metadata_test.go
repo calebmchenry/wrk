@@ -22,7 +22,7 @@ func TestMetadataArguments(t *testing.T) {
 		}
 	}
 	r, err := Parse([]string{"update", "id", "--label=z", "--label=a", "--label=a", "--priority=high"})
-	if err != nil || !r.changes().LabelsSet || !slices.Equal(r.changes().Labels, []string{"z", "a", "a"}) || *r.changes().Priority != "high" {
+	if err != nil || !r.changes(nil).LabelsSet || !slices.Equal(r.changes(nil).Labels, []string{"z", "a", "a"}) || *r.changes(nil).Priority != "high" {
 		t.Fatalf("%+v %v", r, err)
 	}
 	bad := [][]string{

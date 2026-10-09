@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+	"wrk/internal/project"
 	"wrk/internal/ticket"
 )
 
 type Request struct {
+	Selection                                          project.Selection
 	Command                                            string
 	JSON, Help, All, Ready, NoLabels, Recursive, Check bool
 	Args                                               []string
@@ -23,7 +25,7 @@ var commandFlags = map[string]map[string]bool{
 	"version": {}, "upgrade": {"check": false},
 	"init": {}, "new": {"body-file": true, "parent": true, "priority": true, "label": true, "no-labels": false, "depends-on": true, "field": true},
 	"list": {"all": false, "ready": false, "label": true, "under": true}, "show": {},
-	"update": {"title": true, "status": true, "priority": true, "label": true, "no-labels": false, "add-label": true, "remove-label": true, "recursive": false,
+	"update": {"title": true, "status": true, "body-file": true, "priority": true, "label": true, "no-labels": false, "add-label": true, "remove-label": true, "recursive": false,
 		"parent": true, "no-parent": false, "add-dependency": true, "remove-dependency": true, "field": true, "remove-field": true},
 	"validate": {}, "help": {},
 }
@@ -31,6 +33,10 @@ var commandFlags = map[string]map[string]bool{
 var repeatableFlags = map[string]bool{
 	"label": true, "add-label": true, "remove-label": true, "depends-on": true,
 	"add-dependency": true, "remove-dependency": true, "field": true, "remove-field": true,
+}
+
+var projectCommands = map[string]bool{
+	"new": true, "list": true, "show": true, "update": true, "validate": true,
 }
 
 func Parse(args []string) (Request, error) {
@@ -51,6 +57,9 @@ func Parse(args []string) (Request, error) {
 			takesValue := false
 			if name == "version" && r.Command == "" {
 				r.Command = "version"
+			} else if name == "project" || name == "config" {
+				// Selectors may precede the command; check applicability below.
+				takesValue = true
 			} else if name != "json" && name != "help" {
 				var ok bool
 				takesValue, ok = commandFlags[r.Command][name]
@@ -74,6 +83,10 @@ func Parse(args []string) (Request, error) {
 				return r, fmt.Errorf("--%s does not take a value", name)
 			}
 			switch name {
+			case "project":
+				r.Selection.Project = &value
+			case "config":
+				r.Selection.Config = &value
 			case "check":
 				r.Check = true
 			case "json":
@@ -136,6 +149,12 @@ func Parse(args []string) (Request, error) {
 		r.Command = "help"
 		r.Help = true
 	}
+	if err := r.Selection.Validate(); err != nil {
+		return r, err
+	}
+	if (r.Selection.Project != nil || r.Selection.Config != nil) && !projectCommands[r.Command] {
+		return r, fmt.Errorf("--project and --config are not supported by %s", r.Command)
+	}
 	if r.Command == "help" {
 		r.Help = true
 		if len(r.Args) > 1 {
@@ -167,10 +186,10 @@ func Parse(args []string) (Request, error) {
 		return r, fmt.Errorf("%s expects %d to %d positional arguments", r.Command, min, max)
 	}
 	if r.Command == "update" {
-		if err := r.changes().Validate(); err != nil {
+		if err := r.changes(nil).Validate(); err != nil {
 			return r, err
 		}
-		if r.Recursive && r.changes().HasNonLabelChanges() {
+		if r.Recursive && r.changes(nil).HasNonLabelChanges() {
 			return r, fmt.Errorf("--recursive permits only label changes")
 		}
 	}
@@ -189,9 +208,10 @@ func Parse(args []string) (Request, error) {
 	return r, nil
 }
 
-// changes translates command options once for validation and mutation.
-func (r Request) changes() ticket.Changes {
-	return ticket.Changes{
+// changes uses an empty placeholder body during argument validation; mutation
+// passes the body input read before project discovery and locking.
+func (r Request) changes(body []byte) ticket.Changes {
+	c := ticket.Changes{
 		Title: r.Title, Status: r.Status, Priority: r.Priority,
 		AddLabels: r.AddLabels, RemoveLabels: r.RemoveLabels,
 		Labels: r.Labels, LabelsSet: r.NoLabels || len(r.Labels) > 0,
@@ -199,6 +219,11 @@ func (r Request) changes() ticket.Changes {
 		AddDependencies: r.AddDependencies, RemoveDependencies: r.RemoveDependencies,
 		Fields: r.Fields, RemoveFields: r.RemoveFields,
 	}
+	if r.BodyFile != nil {
+		text := string(body)
+		c.Body = &text
+	}
+	return c
 }
 
 // JSONRequested also recognizes JSON on a malformed invocation, respecting --.

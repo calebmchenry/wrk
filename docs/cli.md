@@ -22,6 +22,7 @@
 | `wrk list --under id` | Descendants at every depth, excluding the root. Intersects label and status/readiness filters. |
 | `wrk show id` | Full source plus derived children and unfinished dependency blockers. |
 | `wrk update id --title "Title" --status in-progress` | Either or both flags, one validated mutation. No-op reports `changed: false`, without rewriting. |
+| `wrk update id --body-file path` | Replace the exact UTF-8 body; `-` reads stdin through EOF before locking. Empty input clears it. |
 | `wrk update id --add-label burn --remove-label triage` | Repeatable, idempotent label edits; may combine with title/status/priority. |
 | `wrk update id --priority high --label cli --label storage` | Set priority and replace the entire label list. |
 | `wrk update id --no-labels` | Clear labels; absent/already-empty labels are a no-op. |
@@ -32,10 +33,52 @@
 | `wrk validate` | Aggregate determinable errors without writes. |
 
 Every command accepts `--json` and `--help`. Flags may precede or follow positional
-arguments after the command; global `--json` also precedes the command. Support
+arguments after the command; `--json`, `--help`, and the project selectors below
+also precede the command. Support
 `--flag=value` and `--` to end option parsing. A value beginning with `--` must use
 `--flag=value`. Unknown/repeated scalar flags, surplus arguments, empty updates,
 `list --all --ready`, and `--label ... --no-labels` on new/update are usage errors.
+
+## Project selection
+
+`new`, `list`, `show`, `update`, and `validate` accept either `--project directory`
+or `--config directory/.wrk/config.yaml`, before or after the command:
+
+```sh
+wrk --project '/path/to/my project' list --ready --json
+wrk show <id> --config '/path/to/my project/.wrk/config.yaml'
+wrk --project ../other-project update <id> --body-file description.md
+```
+
+An explicit selector overrides discovery from cwd. `--project` names the exact
+directory containing `.wrk`, not a descendant from which to search upward.
+`--config` names that project's existing `.wrk/config.yaml` and selects all its
+tickets and settings. Alternate config names, separate data/config layouts, and
+applying another project's settings to cwd are unsupported. Missing or invalid
+targets fail without fallback or initialization.
+
+Relative selectors and relative `--body-file` paths both resolve against the
+invocation directory. Selection never changes the process working directory.
+Paths are made absolute and lexically cleaned (`.`/`..` collapsed); directory
+symlinks are followed by filesystem access but are not expanded in the reported
+root. The result is not a physical canonical path: two directory aliases may
+report different roots for the same project. `.wrk` itself must be a real
+directory, and config/ticket/lock files must be regular files, never symlinks.
+Do not change directory aliases during a command; the existing
+[external-editor boundary](storage.md) still applies.
+
+Selectors are scalar and mutually exclusive, including when they name the same
+project. Repeated selectors, empty/missing values, conflicts, and selectors on
+`init`, `help`, `version`/`--version`, or `upgrade` are `USAGE` errors (exit 2).
+`init` retains its positional target directory. Help for a supported data command
+(such as `list --project missing --help`) returns without resolving the selector.
+Help/version/upgrade otherwise remain independent of project discovery.
+
+JSON `project_root` reports the selected absolute root, including failures once
+that root is identified; usage errors and unsupported config path shapes leave it
+null. Human output and project-relative ticket/diagnostic paths retain their
+existing format. Invalid selected roots/boundaries report `INVALID_PROJECT`;
+config shape/content errors report `INVALID_CONFIG` (exit 1).
 
 ## Version and upgrade
 
@@ -113,6 +156,34 @@ are `low`, `normal`, `high`, `urgent`; statuses are `todo`, `in-progress`, `bloc
 Explicit changes on blocked tickets and reopening are allowed. Nothing cascades.
 Relationship and custom-field edits can combine with other single-ticket metadata changes.
 
+## Body updates and revisions
+
+`update --body-file path|-` replaces everything after the closing frontmatter
+delimiter line ending. Omission preserves the existing body byte-for-byte; an
+empty file or empty stdin clears it. LF/CRLF, blank lines, Unicode, and a missing
+final newline are retained exactly. The input is Markdown body content, not a
+complete ticket file; it cannot replace frontmatter.
+
+Read the entire input before project discovery or locking. Relative paths resolve
+against the invocation directory, including when running from a nested directory
+or selecting a different project with `--project` or `--config`.
+Unreadable inputs return `IO`; invalid UTF-8 returns `INVALID_BODY` (exit 1), with
+no mutation. The flag is scalar and may appear before or after the ticket ID.
+Repeated/missing flags and combination with `--recursive` are usage errors.
+
+Body replacement can combine with any supported single-item metadata changes in
+one validated mutation. An identical body with otherwise unchanged values is a
+no-op and retains source bytes and file identity. Frontmatter may be reformatted
+on a real body edit, while unrelated YAML values and file permissions survive.
+
+All JSON ticket summaries include an opaque `revision`, derived from the exact
+source bytes. It is additive in JSON schema version 1 and is not stored in ticket
+frontmatter. Consumers should retain the revision from the same read as their
+draft. The shared Go store accepts a single-item expected revision for future
+browser edits; this CLI batch does not expose a revision-precondition flag.
+See [the revision contract](storage.md#item-revisions-and-stale-edits) for scope,
+conflicts, reload/retry behavior, and remaining concurrency limits.
+
 ## Priority and replacement updates
 
 `update --priority` accepts `low`, `normal`, `high`, or `urgent`. An omitted source
@@ -139,9 +210,10 @@ The label modes are mutually exclusive:
 Conflicts are `USAGE` regardless of flag order or the current labels. Empty or
 non-UTF-8 label arguments are also usage errors. Priority, title, and status can
 combine with any one label mode in one validated single-ticket mutation. All
-updates preserve exact bodies, unrelated YAML semantics, omitted fields, and
-permission bits; no-ops preserve source bytes and file identity. Project creation
-defaults never influence updates or change existing tickets.
+updates preserve exact bodies unless `--body-file` replaces them. Unrelated YAML
+semantics, omitted fields, and permission bits are preserved; no-ops preserve
+source bytes and file identity. Project creation defaults never influence
+updates or change existing tickets.
 
 ## Scopes and label mutations
 
@@ -162,8 +234,8 @@ creation defaults never affect these edits.
 
 Adding and removing the same label in one invocation is `USAGE`, independent of
 flag order. `--recursive` requires at least one label mutation and rejects title,
-status, priority, or other metadata edits. It supports replacement, clearing, and
-incremental label modes with the same conflicts described above. Recursive
+status, priority, body, or other metadata edits. It supports replacement, clearing,
+and incremental label modes with the same conflicts described above. Recursive
 replacement/clearing changes each target's entire label list; use add/remove to
 retain unrelated labels. Relationship and custom-field edits are single-ticket only.
 
@@ -249,16 +321,18 @@ coercion (exit 1, `INVALID_TICKET`). Unconfigured values may be arbitrary YAML,
 including null. Definitions and all fields remain optional. Existing invalid
 projects are rejected before mutation; removing a bad field is not a repair bypass.
 
-Edits preserve exact bodies, permission bits, unrelated built-ins, and every
-unrelated custom value. Aliases of replaced/removed definitions retain their old
-values; anchors may be renamed or relocated. The output is reparsed and checked
+Edits preserve exact bodies unless explicitly replaced. Permission bits, unrelated
+built-ins, and every unrelated custom value are preserved. Aliases of
+replaced/removed definitions retain their old values; anchors may be renamed or
+relocated. The output is reparsed and checked
 before publication. If unrelated values cannot be preserved (for example an
 untouched alias of the entire changing frontmatter), the update fails unchanged
 with `PRESERVATION_UNSUPPORTED`. See the [storage contract](storage.md).
 
 ## Discovery and validation
 
-Walk upward to the nearest entry named `.wrk`. A file, symlink, missing config,
+Without an explicit selector, walk upward to the nearest entry named `.wrk`.
+A file, symlink, missing config,
 or malformed inner project is an authoritative failing boundary. `init` targets
 its argument directly and can create nested projects. Config, ticket candidates,
 and locks must be regular files; project boundaries must be real directories.
@@ -298,6 +372,7 @@ There are no prompts, progress messages, or incidental timestamps.
     "ticket": {
       "id": "wrk-a7f39c21",
       "path": ".wrk/wrk-a7f39c21.md",
+      "revision": "<opaque source revision>",
       "title": "Example",
       "status": "in-progress",
       "parent": null,
@@ -312,7 +387,9 @@ There are no prompts, progress messages, or incidental timestamps.
 }
 ```
 
-`project_root` is absolute, or null before discovery. Project paths are relative,
+`project_root` is absolute, or null before discovery/selection identifies a root.
+It retains directory aliases as described in [project selection](#project-selection).
+Project paths are relative,
 slash-separated, and independent of cwd. Tickets, children, blockers, dependency
 IDs, and labels are lexicographically sorted. Empty arrays are `[]`, never null.
 Blocker objects contain `id` and `status`. Summary defaults are effective values
@@ -330,8 +407,9 @@ and never cause omitted source fields to be inserted during updates.
 | Help | `usage` string |
 
 `show.source` includes every custom value and the body; no lossy custom YAML-to-JSON
-projection is offered. Errors contain `code`, `message`, and applicable `path`,
-`field`, `line`, `column`, and involved `ids`.
+projection is offered. Every ticket summary also includes `revision`, including
+children and mutation results. Errors contain `code`, `message`, and applicable
+`path`, `field`, `line`, `column`, and involved `ids`.
 
 Exit 0 means success/help; 2 means usage error; 1 means operational/data error.
 Stable error codes include `USAGE`, `NOT_FOUND`, `INVALID_TARGET`, `ALREADY_EXISTS`,

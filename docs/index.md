@@ -6,7 +6,9 @@ Use this project's own CLI to track work in [`.wrk/`](../.wrk/). Follow the [dai
 
 - [Ticket format and editing rules](ticket-format.md)
 - [Project configuration](configuration.md)
+- [Explicit project/config selection and path behavior](cli.md#project-selection)
 - [CLI commands and output contract](cli.md)
+- [Body updates](cli.md#body-updates-and-revisions) and [stale-edit revisions](storage.md#item-revisions-and-stale-edits)
 - [Parent and dependency edits](cli.md#relationship-updates) and [typed custom fields](cli.md#custom-field-input-and-updates)
 - [Storage, concurrency, and recovery](storage.md)
 - [Release packaging, publication, and upgrade verification](releases.md)
@@ -17,8 +19,9 @@ Use this project's own CLI to track work in [`.wrk/`](../.wrk/). Follow the [dai
 Agents may edit ticket bodies directly. Creation and changes to frontmatter, relationships, or status go through the CLI. Project configuration may be edited directly.
 
 The CLI supports initialization, creation with parent/dependency/priority/label/custom-field
-values, list/show/validate, and updates to every mutable metadata field (including
-blocked status). Label replacement/clear/add/remove also supports recursive updates.
+values, list/show/validate, exact body replacement, and updates to every mutable
+metadata field (including blocked status). Label replacement/clear/add/remove
+also supports recursive updates.
 Lists can filter labels and descendants. IDs remain immutable; change metadata through the CLI. Direct body/config edits and Git operations must occur outside CLI mutations; see the accepted [external-editor boundary](storage.md).
 
 ## Daily workflow
@@ -93,6 +96,12 @@ Release and upgrade work:
 
 - [wrk-551ff6c2: Publish versioned binaries](../.wrk/wrk-551ff6c2.md) — version metadata, platform packaging, and release publication.
 - [wrk-8d5b1b84: Upgrade to the latest stable release](../.wrk/wrk-8d5b1b84.md) — check, install, and verify/document the upgrade path. List both deliverables and their children with `go run ./cmd/wrk list --all --label upgrade`; implementation prerequisites are recorded as dependency edges; ticket bodies retain the sequencing rationale.
+
+Local web workspace:
+
+- [wrk-a1561423: Serve a local web workspace with live agent updates](../.wrk/wrk-a1561423.md) — local-only server, explicit project/config selection, bundled browser UI, live changes from agents, safe editing, and related links. Eight child tickets carry implementation and verification; the milestone contains their dependency order.
+- [wrk-4036f7d4: Web workspace discovery](../.wrk/wrk-4036f7d4.md) — confirmed user intent and scope decisions. These are backlog requirements, not currently available commands.
+- List the complete batch with `go run ./cmd/wrk list --all --label web`; select ready implementation work with `go run ./cmd/wrk list --ready --under wrk-a1561423`.
 
 ## Sprint plans
 

@@ -21,6 +21,7 @@ Usage:
   wrk list [--all | --ready] [--label value ...] [--under id]
   wrk show <id>
   wrk update <id> [--title "Title"] [--status todo|in-progress|blocked|done|canceled]
+                  [--body-file path|-]
                   [--priority low|normal|high|urgent]
                   [--label value ... | --no-labels |
                    --add-label value ... --remove-label value ...] [--recursive]
@@ -30,7 +31,17 @@ Usage:
   wrk validate
   wrk help [command]
 
+Project selection for new, list, show, update, and validate:
+  --project directory | --config directory/.wrk/config.yaml
+Selectors may precede or follow the command and override cwd discovery.
+Relative paths (including --body-file) resolve from the invocation directory.
+Explicit selection requires an existing project; it never searches ancestors.
+Without a selector, use the nearest .wrk boundary from cwd.
+Init uses its positional directory; help/version/upgrade do not use selectors.
+
 Update --label replaces the entire label list; --no-labels clears it.
+Update --body-file replaces the exact UTF-8 body; empty input clears it.
+Omitting --body-file preserves the body. Body edits can combine with metadata.
 Replacement/clear conflict with add/remove; either add or remove may be used alone.
 Label filters require ALL labels; --under excludes the root. Filters intersect.
 Ready means todo with every dependency done. Blocked stays active, never ready.

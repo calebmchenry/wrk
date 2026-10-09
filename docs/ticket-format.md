@@ -6,13 +6,18 @@ Each ticket is one UTF-8 Markdown file at `.wrk/<id>.md`. YAML frontmatter holds
 
 - People and agents may directly edit everything after the closing frontmatter delimiter: descriptions, acceptance criteria, decisions, and handoff notes.
 - Create tickets and change all frontmatter through the CLI. This includes titles, statuses, parents, dependencies, priorities, labels, and custom-field values. IDs are immutable.
-- The CLI validates changes before writing and preserves the existing Markdown body exactly when changing metadata. Failed validation leaves files unchanged.
+- The CLI validates changes before writing and preserves the existing Markdown body exactly unless `update --body-file path|-` explicitly replaces it. Empty supplied input clears the body. Body and metadata edits can be combined; failed validation leaves files unchanged.
 - CLI writers are serialized with a persistent lock. Updates compare all validation inputs immediately before publication and reject detected changes. Direct body/config edits and Git operations must happen outside CLI mutations: an editor save between the final comparison and replacement can still be lost. See [the storage boundary](storage.md).
 - These are repository conventions, not filesystem access controls. The `wrk validate` command will check repository integrity, including changes introduced by manual edits or Git merges; it cannot prove which tool made an edit.
 
 This project's initial files were migrated before the CLI existed. The CLI now creates tickets with parent, dependency, priority, label, and custom-field values, and updates every mutable metadata field. Label edits also support recursive updates. Use `--no-parent` to clear parenting, `--add-dependency` / `--remove-dependency` to edit prerequisites, and `--field` / `--remove-field` for custom values. See the [CLI contract](cli.md) for syntax and conflict rules.
 
-The body is every byte after the closing delimiter line ending; LF and CRLF are accepted, including an empty body and no terminal newline. Updates preserve exact body bytes and unrelated YAML values, including custom tags and aliases. Frontmatter formatting/comments are not byte guarantees. If preservation cannot be established, an update fails unchanged with `PRESERVATION_UNSUPPORTED`; reads remain available for otherwise valid files.
+The body is every byte after the closing delimiter line ending; LF and CRLF are accepted, including an empty body and no terminal newline. Updates preserve the existing body bytes unless explicitly supplied, in which case the supplied UTF-8 bytes are used exactly. Unrelated YAML values, including custom tags and aliases, are preserved. Frontmatter formatting/comments are not byte guarantees, including on body-only edits. If preservation cannot be established, an update fails unchanged with `PRESERVATION_UNSUPPORTED`; reads remain available for otherwise valid files.
+
+JSON summaries expose a derived opaque source revision for stale-edit protection.
+It covers exact frontmatter and body bytes and is never written as a frontmatter
+field. The ticket format remains version 1 with no migration. See
+[item revisions](storage.md#item-revisions-and-stale-edits).
 
 ## Example
 
