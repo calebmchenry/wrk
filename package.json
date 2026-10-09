@@ -1,0 +1,11 @@
+{
+  "name": "wrk-browser-tests",
+  "private": true,
+  "scripts": {
+    "test": "node --test internal/web/model.test.mjs",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.0"
+  }
+}

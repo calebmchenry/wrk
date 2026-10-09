@@ -103,10 +103,11 @@ produce `LISTEN` (exit 1), with no automatic fallback. The actual URL and absolu
 project root are printed after a successful listen.
 
 The executable embeds the HTML, CSS, and JavaScript; it needs no CDN, Node,
-frontend server, external fonts, or separate asset installation. The current
-shell identifies the project, shows its validated item count, and offers manual
-reload with diagnostics. Full item browsing, automatic live refresh, and editing
-belong to the following web tickets and are not implemented yet.
+frontend server, external fonts, or separate asset installation. The workspace
+provides body/title/ID search, intersecting views/labels/parent focus, and item
+details with safe Markdown and relationship navigation. Manual reload picks up
+external changes and displays validation diagnostics. Automatic live refresh
+and browser editing remain separate tickets. See [browser behavior](browser.md).
 
 `--open` runs `open <url>` on macOS or `xdg-open <url>` on Linux, after listening,
 without a shell. It is opt-in and has a three-second timeout. A launch failure
@@ -161,8 +162,9 @@ is allowed. OPTIONS/preflight is not enabled.
 | Route | Successful `result` |
 | --- | --- |
 | `/api/project` | `ticket_count`, `config` (`version`, `prefix`, `defaults.priority`, `defaults.labels`, `fields` definitions), ordered `statuses` and `priorities`. Each field definition has `type`, `description`, `options`. |
+| `/api/workspace` | `project` (the `/api/project` result) and all `tickets` (summaries plus exact UTF-8 `body`), from one validated load. Used for browser search/filtering, including closed items. |
 | `/api/items` | `tickets`, using the CLI summary contract including source revision, parent, dependencies, labels, effective priority, and derived blockers. Defaults to active items. |
-| `/api/items/<id>` | `ticket` summary, exact UTF-8 `body` and full `source`, and direct `children` summaries. |
+| `/api/items/<id>` | `ticket` summary, exact UTF-8 `body` and full `source`, original `metadata` (source before body, including delimiters), safe `body_html`, nullable `parent` summary, and `children`, `dependencies`, and reverse `dependents` summary arrays. |
 
 List parameters are `all=true|false`, `ready=true|false`, repeatable nonempty
 `label`, and scalar `under=<id>`. They use the CLI's intersections, readiness,
@@ -170,7 +172,8 @@ and descendant semantics. All/ready cannot both be true. Unknown parameters,
 repeated scalars, malformed encoding, and invalid values return 400; missing
 items/scope roots return 404. IDs must match the existing ID grammar. Roots,
 config paths, and arbitrary file paths cannot be supplied in requests.
-Project and item routes accept no query parameters.
+Project, workspace, and item routes accept no query parameters. Workspace does
+not alter the existing list API's CLI-compatible defaults and filter semantics.
 
 HTTP JSON uses `{schema_version: 1, ok, project_root, result, errors}`. Successful
 errors arrays are empty; failed results are null with actionable shared diagnostics
@@ -183,11 +186,14 @@ boundary as CLI reads; multiple requests are not a transaction. Item revisions
 cover exact source bytes as described in [storage](storage.md#item-revisions-and-stale-edits).
 Arbitrary custom YAML values remain in `source`, without lossy JSON coercion.
 
-Only `/`, `/app.js`, and `/style.css` serve assets, from the embedded filesystem.
+Only `/`, `/app.js`, `/model.mjs`, and `/style.css` serve assets, from the embedded filesystem.
 No directory listing, project-file serving, clean-path redirects, or SPA fallback
 is provided. Assets and APIs use `Cache-Control: no-store`, `nosniff`, no-referrer,
 frame denial, and a self-only Content Security Policy without inline script access.
-Project content is inserted as text, never executable HTML.
+Metadata, source, and diagnostics are inserted as text. Only server-rendered
+Markdown enters the HTML sink: Goldmark with raw HTML disabled, restricted links,
+and images replaced by text. CSP disables image loads entirely. See the
+[Markdown policy](browser.md#markdown-and-custom-values).
 
 ### Resource limits and recovery
 

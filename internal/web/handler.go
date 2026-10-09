@@ -16,7 +16,7 @@ import (
 	"wrk/internal/ticket"
 )
 
-//go:embed assets/index.html assets/app.js assets/style.css
+//go:embed assets/index.html assets/app.js assets/model.mjs assets/style.css
 var assets embed.FS
 
 type response struct {
@@ -84,7 +84,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 	if !h.checkOrigin(r) {
 		fail(w, http.StatusForbidden, nil, "FORBIDDEN", "use the printed local URL and same-origin requests")
 		return
@@ -114,13 +114,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, &h.root, "NOT_FOUND", "unknown route or invalid item ID")
 		return
 	}
-	if file, ok := map[string]string{"/": "index.html", "/app.js": "app.js", "/style.css": "style.css"}[r.URL.Path]; ok {
+	if file, ok := map[string]string{"/": "index.html", "/app.js": "app.js", "/model.mjs": "model.mjs", "/style.css": "style.css"}[r.URL.Path]; ok {
 		if r.URL.RawQuery != "" {
 			fail(w, 400, &h.root, "BAD_REQUEST", "this route does not accept query parameters")
 			return
 		}
 		data, _ := assets.ReadFile("assets/" + file)
-		contentType := map[string]string{"index.html": "text/html; charset=utf-8", "app.js": "text/javascript; charset=utf-8", "style.css": "text/css; charset=utf-8"}[file]
+		contentType := map[string]string{"index.html": "text/html; charset=utf-8", "app.js": "text/javascript; charset=utf-8", "model.mjs": "text/javascript; charset=utf-8", "style.css": "text/css; charset=utf-8"}[file]
 		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Content-Length", fmt.Sprint(len(data)))
 		if r.Method != http.MethodHead {
@@ -131,7 +131,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	id := strings.TrimPrefix(path, "/api/items/")
 	isItem := strings.HasPrefix(path, "/api/items/") && ticket.IDPattern.MatchString(id)
-	if path != "/api/project" && path != "/api/items" && !isItem {
+	if path != "/api/project" && path != "/api/workspace" && path != "/api/items" && !isItem {
 		fail(w, 404, &h.root, "NOT_FOUND", "unknown route or invalid item ID")
 		return
 	}
@@ -162,6 +162,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/api/project":
 		reply(w, 200, &h.root, projectInfo(s), nil)
+	case path == "/api/workspace":
+		items := []workspaceItem{}
+		for _, summary := range s.List(true, false) {
+			items = append(items, workspaceItem{Summary: summary, Body: string(s.ByID[summary.ID].Body)})
+		}
+		reply(w, 200, &h.root, map[string]any{"project": projectInfo(s), "tickets": items}, nil)
 	case path == "/api/items":
 		if filters.under != nil && s.ByID[*filters.under] == nil {
 			fail(w, 404, &h.root, "NOT_FOUND", "scope root not found in this project")
@@ -174,8 +180,38 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fail(w, 404, &h.root, "NOT_FOUND", "ticket not found in this project")
 			return
 		}
-		reply(w, 200, &h.root, map[string]any{"ticket": s.Summary(t), "body": string(t.Body), "source": string(t.Source), "children": s.Children(id)}, nil)
+		bodyHTML, err := renderMarkdown(t.Body)
+		if err != nil {
+			fail(w, 500, &h.root, "RENDER", "unable to render item description")
+			return
+		}
+		dependencies, dependents := []project.Summary{}, []project.Summary{}
+		var parent *project.Summary
+		if t.Parent != nil {
+			p := s.Summary(s.ByID[*t.Parent])
+			parent = &p
+		}
+		for _, dep := range s.Summary(t).DependsOn {
+			dependencies = append(dependencies, s.Summary(s.ByID[dep]))
+		}
+		for _, other := range s.List(true, false) {
+			for _, dep := range other.DependsOn {
+				if dep == id {
+					dependents = append(dependents, other)
+				}
+			}
+		}
+		reply(w, 200, &h.root, map[string]any{
+			"ticket": s.Summary(t), "body": string(t.Body), "body_html": bodyHTML,
+			"source": string(t.Source), "metadata": string(t.Source[:len(t.Source)-len(t.Body)]),
+			"parent": parent, "children": s.Children(id), "dependencies": dependencies, "dependents": dependents,
+		}, nil)
 	}
+}
+
+type workspaceItem struct {
+	project.Summary
+	Body string `json:"body"`
 }
 
 type listFilters struct {

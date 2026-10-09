@@ -240,7 +240,7 @@ Ignore `**/.wrk/.lock` and `**/.wrk/.wrk-stage-*` in other projects' `.gitignore
 These runtime files are ignored by ticket scanning. See [storage and recovery](docs/storage.md)
 for filesystem support, concurrency limits, permissions, and interruption handling.
 
-## Local browser workspace preview
+## Local browser workspace
 
 ```sh
 wrk serve                         # 127.0.0.1:7331
@@ -250,9 +250,17 @@ wrk serve --project '/path/to/project'
 
 The server prints the selected absolute project path and usable local URL.
 It serves one existing project and embeds all browser assets in the executable.
-The current page shows project identity, item count, and validation diagnostics
-with manual reload. Read APIs expose items, revisions, hierarchy, blockers, and
-configuration; full browsing, live updates, and editing are subsequent work.
+Browse a searchable list and item detail pane with Markdown descriptions,
+statuses, priority, labels, hierarchy, dependencies, and custom values. Search
+matches title, ID, and body. Active, All, Ready, and manually Blocked views
+intersect with exact label filters and a parent focus. Selection and filters
+survive links and browser navigation. Use **Reload project** to pick up CLI/agent
+changes; automatic live updates and browser editing are subsequent work.
+
+Parent focus includes the selected root and all descendants before other
+filters apply; CLI `list --under` excludes the root. Markdown images appear as
+text placeholders, raw HTML is disabled, and arbitrary local files are not
+served. See [browser behavior and verification](docs/browser.md).
 
 CLI/agent edits can continue while it runs. Port conflicts fail without switching;
 `--open` is optional and a browser-launch failure leaves the URL usable. Ctrl-C
@@ -284,6 +292,7 @@ go test -count=1 ./...
 go test -race -count=1 ./...
 go vet ./...
 go build -o ./bin/wrk ./cmd/wrk
+node --test internal/web/model.test.mjs
 ```
 
 Formatting must report no files. Use `-count=1` so the integration package reruns
@@ -293,3 +302,7 @@ Linux local filesystems; cross-compilation alone does not exercise storage.
 Tests use disposable projects and retain the
 immutable original data in `testdata/compat/.wrk/`. [Sprint 001 evidence](docs/sprints/SPRINT-001-EXECUTION.md)
 records macOS/Linux verification and clean-source build/install runs.
+
+For browser changes, also run `npm ci`, `npx playwright install chromium`, and
+`npm run test:browser`. These are development dependencies only; the executable
+embeds the complete UI. See [browser checks](docs/browser.md#verification).

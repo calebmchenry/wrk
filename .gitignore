@@ -2,3 +2,7 @@
 /dist/
 **/.wrk/.lock
 **/.wrk/.wrk-stage-*
+
+/node_modules/
+/playwright-report/
+/test-results/

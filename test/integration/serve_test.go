@@ -237,7 +237,7 @@ func TestPackagedBinaryServesEmbeddedAssets(t *testing.T) {
 	run(t, root, "", 0, "init", "--json")
 	p := startServe(t, executable, cwd, "serve", "--project", root, "--port=0", "--json")
 	html := getServe(t, p.url, 200)
-	refs := regexp.MustCompile(`(?:src|href)="([^"]+)"`).FindAllSubmatch(html, -1)
+	refs := regexp.MustCompile(`(?:<script[^>]*src|<link[^>]*href)="([^"]+)"`).FindAllSubmatch(html, -1)
 	if len(refs) != 2 {
 		t.Fatal("expected embedded CSS and JS", string(html))
 	}
@@ -250,6 +250,11 @@ func TestPackagedBinaryServesEmbeddedAssets(t *testing.T) {
 		if len(asset) == 0 {
 			t.Fatal("empty asset", path)
 		}
+	}
+	// The bundled app's local module must also work outside the checkout.
+	module := getServe(t, p.url+"model.mjs", 200)
+	if !bytes.Contains(module, []byte("export function selectItems")) {
+		t.Fatal("missing browser model module")
 	}
 	if !bytes.Contains(html, []byte("Local workspace")) {
 		t.Fatal(string(html))

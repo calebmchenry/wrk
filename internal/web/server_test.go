@@ -328,3 +328,45 @@ func TestStartupRejectsInvalidProject(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkspaceAndDetailBrowsing(t *testing.T) {
+	root := fixture(t)
+	h := newHandler(root, "127.0.0.1:7331")
+	write(t, root, ".wrk/task-00000004.md", "---\nid: task-00000004\ntitle: Grandchild\nstatus: canceled\nparent: task-00000002\n---\nSearchable body only\n")
+	e := decode(t, request(h, "GET", "/api/workspace", nil), 200)
+	workspace := e.Result.(map[string]any)
+	items := workspace["tickets"].([]any)
+	if len(items) != 4 || workspace["project"].(map[string]any)["ticket_count"] != float64(4) {
+		t.Fatal(e)
+	}
+	last := items[3].(map[string]any)
+	if last["body"] != "Searchable body only\n" || last["status"] != "canceled" || last["parent"] != "task-00000002" {
+		t.Fatal(last)
+	}
+	e = decode(t, request(h, "GET", "/api/items/task-00000001", nil), 200)
+	detail := e.Result.(map[string]any)
+	if detail["parent"] != nil || len(detail["dependents"].([]any)) != 1 || len(detail["dependencies"].([]any)) != 0 {
+		t.Fatal(detail)
+	}
+	e = decode(t, request(h, "GET", "/api/items/task-00000002", nil), 200)
+	detail = e.Result.(map[string]any)
+	if detail["parent"].(map[string]any)["id"] != "task-00000001" || len(detail["dependencies"].([]any)) != 1 || len(detail["children"].([]any)) != 1 {
+		t.Fatal(detail)
+	}
+	if !strings.Contains(detail["body_html"].(string), "<h2>Body 🦊</h2>") || !strings.Contains(detail["metadata"].(string), "opaque: &cycle [*cycle]") {
+		t.Fatal(detail)
+	}
+	if detail["metadata"].(string)+detail["body"].(string) != detail["source"] {
+		t.Fatal("metadata/body must preserve arbitrary YAML and exact source")
+	}
+	decode(t, request(h, "GET", "/api/workspace?all=true", nil), 400)
+	decode(t, request(h, "GET", "/api/workspace", map[string]string{"Origin": "https://evil.example"}), 403)
+	write(t, root, ".wrk/task-00000004.md", "invalid")
+	decode(t, request(h, "GET", "/api/workspace", nil), 503)
+	for _, path := range []string{"/", "/app.js", "/model.mjs", "/style.css"} {
+		w := request(h, "GET", path, nil)
+		if w.Code != 200 || !strings.Contains(w.Header().Get("Content-Security-Policy"), "img-src 'none'") {
+			t.Fatal(path, w.Code, w.Header())
+		}
+	}
+}

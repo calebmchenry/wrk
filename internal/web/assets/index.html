@@ -5,20 +5,35 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>wrk · Local workspace</title>
   <link rel="stylesheet" href="/style.css">
-  <script src="/app.js" defer></script>
+  <script type="module" src="/app.js"></script>
 </head>
 <body>
-  <main>
-    <header><span class="wordmark">wrk</span><span class="badge">Local workspace</span></header>
-    <h1>Your project, close at hand.</h1>
-    <p id="project" class="path">Connecting to your project…</p>
-    <section aria-live="polite" aria-atomic="true">
-      <h2 id="status">Loading project</h2>
-      <p id="summary"></p>
-      <pre id="diagnostics" hidden></pre>
-    </section>
+  <a class="skip-link" href="#workspace">Skip to workspace</a>
+  <header class="topbar">
+    <a class="wordmark" href="#" aria-label="wrk home">wrk<span>.</span></a>
+    <div class="project-heading"><p class="eyebrow">LOCAL WORKSPACE</p><h1 id="project-name">Your project</h1><p id="project" class="path">Connecting…</p></div>
     <button id="reload" type="button">Reload project</button>
-    <p class="note">This preview checks your local project. Item browsing, live updates, and editing are coming next.</p>
+  </header>
+  <div class="connection"><span class="connection-dot" aria-hidden="true"></span><span id="status" role="status">Loading project…</span><span class="manual-note">Manual refresh</span></div>
+  <section id="problem" role="alert" hidden><h2>Project needs attention</h2><pre id="diagnostics"></pre><p>Check the named files with <code>wrk validate</code>, then reload the project.</p></section>
+  <main id="workspace" aria-busy="true">
+    <aside id="browse" aria-label="Browse items">
+      <div class="filters">
+        <div class="section-heading"><h2>Items <span id="total" class="count"></span></h2><button id="reset" class="text-button" type="button">Reset filters</button></div>
+        <label for="search">Search items</label><input id="search" type="search" placeholder="Title, ID, or description" autocomplete="off">
+        <div class="view-tabs" role="group" aria-label="Item view">
+          <button type="button" data-view="active" aria-pressed="true">Active</button><button type="button" data-view="all" aria-pressed="false">All</button><button type="button" data-view="ready" aria-pressed="false">Ready</button><button type="button" data-view="blocked" aria-pressed="false">Blocked</button>
+        </div>
+        <p id="view-help" class="hint">Todo, in progress, and manually blocked.</p>
+        <details id="label-filter"><summary>Labels <span id="label-count"></span></summary><div id="label-options"></div><p class="hint">Match every selected label, exactly.</p></details>
+        <label for="focus">Parent focus</label><select id="focus"><option value="">Entire project</option></select>
+        <p class="hint">Parent + all descendants, intersected with filters.</p>
+      </div>
+      <p id="results" role="status">Loading items…</p>
+      <div id="list-scroll" tabindex="0" aria-label="Item list"><ul id="items"></ul><div id="empty" class="empty" hidden></div></div>
+    </aside>
+    <section id="detail" tabindex="-1" aria-label="Item detail"><div class="empty detail-placeholder"><span class="empty-symbol" aria-hidden="true">↗</span><h2>Select an item</h2><p>Keep the work in view.<br>Choose an item to explore its description and connections.</p></div></section>
   </main>
+  <noscript>This workspace needs JavaScript. You can also browse with wrk list and wrk show.</noscript>
 </body>
 </html>
