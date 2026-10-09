@@ -2,7 +2,10 @@ package project
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -26,14 +29,36 @@ type Snapshot struct {
 }
 
 func candidateNames(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
+	return candidateNamesContext(context.Background(), dir, 0)
+}
+
+func candidateNamesContext(ctx context.Context, dir string, maxEntries int) ([]string, error) {
+	f, err := os.Open(dir)
 	if err != nil {
 		return nil, err
 	}
+	defer f.Close()
 	names := []string{}
-	for _, e := range entries {
-		if ticket.FilenamePattern.MatchString(e.Name()) {
-			names = append(names, e.Name())
+	count := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		entries, err := f.ReadDir(256)
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+		count += len(entries)
+		if maxEntries > 0 && count > maxEntries {
+			return nil, errReadLimit
+		}
+		for _, e := range entries {
+			if ticket.FilenamePattern.MatchString(e.Name()) {
+				names = append(names, e.Name())
+			}
+		}
+		if err == io.EOF {
+			break
 		}
 	}
 	sort.Strings(names)
@@ -41,14 +66,64 @@ func candidateNames(dir string) ([]string, error) {
 }
 
 func Load(root string) *Snapshot {
+	return LoadContext(context.Background(), root, ReadLimits{})
+}
+
+// ReadLimits are optional service resource limits, not project-format limits.
+// Zero values retain the ordinary CLI's unbounded loading behavior.
+type ReadLimits struct {
+	FileBytes, TotalBytes int64
+	DirectoryEntries      int
+}
+
+var errReadLimit = errors.New("project read limit exceeded; reduce project/file size or use the CLI")
+
+// LoadContext uses the same strict validation as Load, with cancellation between
+// file reads and validation phases. YAML parsing itself is not preemptible.
+func LoadContext(ctx context.Context, root string, limits ReadLimits) *Snapshot {
 	s := &Snapshot{Root: root, Files: map[string]File{}, Names: []string{}, Tickets: []*ticket.Ticket{}, ByID: map[string]*ticket.Ticket{}, Diagnostics: []diagnostic.Diagnostic{}}
+	abort := func(err error, path string) bool {
+		code := ""
+		if errors.Is(err, errReadLimit) {
+			code = "RESOURCE_LIMIT"
+		} else if ctx.Err() != nil {
+			code, err = "CANCELED", ctx.Err()
+		}
+		if code == "" {
+			return false
+		}
+		s.Diagnostics = append(s.Diagnostics, diagnostic.New(code, err.Error(), path))
+		return true
+	}
+	if abort(ctx.Err(), ".wrk") {
+		return s
+	}
+	var total int64
+	read := func(path string) ([]byte, os.FileInfo, error) {
+		limit := limits.FileBytes
+		if limits.TotalBytes > 0 {
+			remaining := limits.TotalBytes - total
+			if remaining <= 0 {
+				return nil, nil, errReadLimit
+			}
+			if limit == 0 || remaining < limit {
+				limit = remaining
+			}
+		}
+		data, info, err := readRegularContext(ctx, filepath.Join(root, path), limit)
+		total += int64(len(data))
+		return data, info, err
+	}
 	dir := filepath.Join(root, ".wrk")
 	info, err := os.Lstat(dir)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		s.Diagnostics = append(s.Diagnostics, diagnostic.New("INVALID_PROJECT", ".wrk must be an existing real directory", ".wrk"))
 		return s
 	}
-	data, info, err := readRegular(filepath.Join(root, ConfigPath))
+	data, info, err := read(ConfigPath)
+	if abort(err, ConfigPath) {
+		return s
+	}
 	configValid := false
 	if err != nil {
 		s.Diagnostics = append(s.Diagnostics, diagnostic.New("INVALID_CONFIG", "cannot read regular config: "+err.Error(), ConfigPath))
@@ -59,7 +134,10 @@ func Load(root string) *Snapshot {
 		s.Diagnostics = append(s.Diagnostics, ds...)
 		configValid = len(ds) == 0
 	}
-	s.Names, err = candidateNames(dir)
+	s.Names, err = candidateNamesContext(ctx, dir, limits.DirectoryEntries)
+	if abort(err, ".wrk") {
+		return s
+	}
 	if err != nil {
 		s.Diagnostics = append(s.Diagnostics, diagnostic.New("IO", err.Error(), ".wrk"))
 		return s
@@ -71,7 +149,10 @@ func Load(root string) *Snapshot {
 	graphAvailable := true
 	for _, name := range s.Names {
 		path := ".wrk/" + name
-		data, info, err := readRegular(filepath.Join(dir, name))
+		data, info, err := read(path)
+		if abort(err, path) {
+			return s
+		}
 		if err != nil {
 			s.Diagnostics = append(s.Diagnostics, diagnostic.New("INVALID_TICKET", "cannot read regular ticket: "+err.Error(), path))
 			graphAvailable = false
@@ -102,6 +183,9 @@ func Load(root string) *Snapshot {
 			}
 		}
 	}
+	if abort(ctx.Err(), ".wrk") {
+		return s
+	}
 	if !configValid {
 		s.Diagnostics = append(s.Diagnostics, diagnostic.New("CHECK_UNAVAILABLE", "configured custom-field checks unavailable until configuration is valid", ConfigPath))
 	}
@@ -109,6 +193,9 @@ func Load(root string) *Snapshot {
 		s.Diagnostics = append(s.Diagnostics, ValidateGraphs(s)...)
 	} else {
 		s.Diagnostics = append(s.Diagnostics, diagnostic.New("CHECK_UNAVAILABLE", "relationship checks unavailable until ticket identities and relationship fields are unambiguous", ".wrk"))
+	}
+	if abort(ctx.Err(), ".wrk") {
+		return s
 	}
 	if len(s.Diagnostics) > 0 {
 		s.Diagnostics = append(s.Diagnostics, diagnostic.New("PROJECT_INVALID", "restore a known-good file or obtain explicitly authorized repair; normal commands require a valid project", ".wrk"))

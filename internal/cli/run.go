@@ -133,6 +133,9 @@ func run(args []string, cwd string, in io.Reader, out, errout io.Writer, updater
 	if len(ds) > 0 {
 		return render(out, errout, r, e, "", 1)
 	}
+	if r.Command == "serve" {
+		return runServe(r, root, out, errout)
+	}
 	if r.Command == "new" {
 		result := store.Create(root, store.CreateOptions{Title: r.Args[0], Body: body, Parent: r.Parent, Priority: r.Priority, Labels: r.Labels, LabelsSet: r.NoLabels || len(r.Labels) > 0, Dependencies: r.Dependencies, Fields: r.Fields})
 		return renderMutation(out, errout, r, e, result)

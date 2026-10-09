@@ -9,6 +9,7 @@
 | `wrk upgrade --check` | Check the latest stable release without local writes. |
 | `wrk upgrade` | Verify and atomically install a newer standalone release binary. |
 | `wrk init [directory]` | Existing target directory, default cwd. Exclusively create `.wrk` and the [default config](configuration.md). Refuse any existing entry. |
+| `wrk serve [--port 0..65535] [--open]` | Serve one existing project on `127.0.0.1`, default port 7331. Bundled page and strict read APIs; Ctrl-C stops it. |
 | `wrk new "Title"` | Create a `todo` ticket with configured prefix, priority, and labels; print ID/path. |
 | `wrk new "Title" --body-file path` | Exact UTF-8 body bytes; `-` reads stdin through EOF before locking. |
 | `wrk new "Title" --parent id` | Create a child of an existing project ticket. |
@@ -41,7 +42,7 @@ also precede the command. Support
 
 ## Project selection
 
-`new`, `list`, `show`, `update`, and `validate` accept either `--project directory`
+`new`, `list`, `show`, `update`, `validate`, and `serve` accept either `--project directory`
 or `--config directory/.wrk/config.yaml`, before or after the command:
 
 ```sh
@@ -79,6 +80,136 @@ that root is identified; usage errors and unsupported config path shapes leave i
 null. Human output and project-relative ticket/diagnostic paths retain their
 existing format. Invalid selected roots/boundaries report `INVALID_PROJECT`;
 config shape/content errors report `INVALID_CONFIG` (exit 1).
+
+## Local server
+
+```sh
+wrk serve                               # http://127.0.0.1:7331/
+wrk serve --port 0 --open                # OS-allocated port; opt-in browser launch
+wrk --project '/path/to/my project' serve --port 8080
+wrk serve --config '/path/to/my project/.wrk/config.yaml' --json
+```
+
+`serve` resolves an existing project once, validates it before listening, and
+keeps that absolute root for its lifetime. The ordinary selection/discovery and
+symlink rules apply. A new nearer `.wrk` directory cannot change the selection.
+No initialization, database, cache, writer lock, or per-request subprocess is used.
+CLI and agent writes remain available while the server runs.
+
+Bind only IPv4 `127.0.0.1`. Port defaults to 7331; `--port` accepts decimal integers
+0 through 65535. Zero requests an OS-assigned port; every other value is used
+exactly. Invalid values are usage errors (exit 2); occupied/unavailable ports
+produce `LISTEN` (exit 1), with no automatic fallback. The actual URL and absolute
+project root are printed after a successful listen.
+
+The executable embeds the HTML, CSS, and JavaScript; it needs no CDN, Node,
+frontend server, external fonts, or separate asset installation. The current
+shell identifies the project, shows its validated item count, and offers manual
+reload with diagnostics. Full item browsing, automatic live refresh, and editing
+belong to the following web tickets and are not implemented yet.
+
+`--open` runs `open <url>` on macOS or `xdg-open <url>` on Linux, after listening,
+without a shell. It is opt-in and has a three-second timeout. A launch failure
+prints `OPEN_BROWSER` with the URL and leaves the server running. Open that URL
+manually. The launcher returning successfully does not prove a browser displayed it.
+
+Ctrl-C and SIGTERM cancel handlers and stop accepting connections. Shutdown allows
+up to three seconds to drain and then closes remaining connections. A normal stop
+exits 0; a listen/server/shutdown/output error exits 1. SIGKILL or failed output
+cannot guarantee a terminal event. No stream endpoint is implemented yet; future
+streams must observe the request context and avoid hijacking connections.
+
+### Serve output
+
+Human mode writes root/URL/start instructions and the final stop message to
+stdout, with diagnostics and browser-launch warnings on stderr. Terminal escaping
+is unchanged. HTTP access logs are not mixed into command output.
+
+`serve --json` is the long-running exception to the single-envelope CLI contract:
+it emits newline-delimited schema-version-1 envelopes with `command: "serve"`,
+the selected `project_root`, `ok`, `result`, and `errors`. Each line is complete
+and immediately written; do not wait for process exit to read startup information.
+
+| Phase | Envelope |
+| --- | --- |
+| Usage, resolution, validation, or listen failure | One ordinary failure envelope, `ok: false`, `result: null`; no started event. |
+| Listening | `ok: true`, `result: {"event":"started","url":"http://127.0.0.1:<port>/"}`, empty errors. |
+| Browser launch fails | Nonfatal `ok: true`, `result` has `event: "warning"`, `url`, and a diagnostic-shaped `warning` with code `OPEN_BROWSER`; empty errors. |
+| Normal shutdown | `ok: true`, `result` has `event: "stopped"` and `url`; empty errors. |
+| Server/shutdown failure after startup | `ok: false`, `result` has `event: "error"` and `url`; errors include `SERVE`; exit 1. |
+
+JSON mode emits no routine stderr output. `serve --help --json` remains an
+ordinary single successful help envelope without resolving a project.
+
+### Read API
+
+Only the printed authority `127.0.0.1:<actual-port>` is accepted. `localhost`,
+alternate IP spellings, other ports/hosts, proxy-form requests, foreign/null
+Origins, and cross-site or same-site Fetch Metadata requests receive 403.
+Browser requests must be same-origin; direct navigation (`Sec-Fetch-Site: none`)
+and local clients without Origin/Fetch Metadata are supported for reads.
+No CORS permissions are returned. Security rejections omit the project root.
+Loopback is a local-user trust boundary, not authentication against local software.
+
+All routes accept GET/HEAD only. Read requests must have no body. The common guard
+already requires an exact same-origin `Origin` and `Content-Type: application/json`
+for unsafe methods; passing it currently returns 405. Future mutation endpoints
+must retain this guard and body limit, validate JSON, and call shared store services
+with the expected item revision. No cross-origin or missing-Origin write exception
+is allowed. OPTIONS/preflight is not enabled.
+
+| Route | Successful `result` |
+| --- | --- |
+| `/api/project` | `ticket_count`, `config` (`version`, `prefix`, `defaults.priority`, `defaults.labels`, `fields` definitions), ordered `statuses` and `priorities`. Each field definition has `type`, `description`, `options`. |
+| `/api/items` | `tickets`, using the CLI summary contract including source revision, parent, dependencies, labels, effective priority, and derived blockers. Defaults to active items. |
+| `/api/items/<id>` | `ticket` summary, exact UTF-8 `body` and full `source`, and direct `children` summaries. |
+
+List parameters are `all=true|false`, `ready=true|false`, repeatable nonempty
+`label`, and scalar `under=<id>`. They use the CLI's intersections, readiness,
+and descendant semantics. All/ready cannot both be true. Unknown parameters,
+repeated scalars, malformed encoding, and invalid values return 400; missing
+items/scope roots return 404. IDs must match the existing ID grammar. Roots,
+config paths, and arbitrary file paths cannot be supplied in requests.
+Project and item routes accept no query parameters.
+
+HTTP JSON uses `{schema_version: 1, ok, project_root, result, errors}`. Successful
+errors arrays are empty; failed results are null with actionable shared diagnostics
+(code/message and path/field/line/IDs when available). Each read freshly loads and
+validates the whole project. Any invalid file/config/reference makes the read fail
+with 503, even when the requested item is valid. No partial success or stale healthy
+snapshot is returned. After external repair, another request/reload can succeed.
+Reads are independent filesystem snapshots, with the same external-editor/Git
+boundary as CLI reads; multiple requests are not a transaction. Item revisions
+cover exact source bytes as described in [storage](storage.md#item-revisions-and-stale-edits).
+Arbitrary custom YAML values remain in `source`, without lossy JSON coercion.
+
+Only `/`, `/app.js`, and `/style.css` serve assets, from the embedded filesystem.
+No directory listing, project-file serving, clean-path redirects, or SPA fallback
+is provided. Assets and APIs use `Cache-Control: no-store`, `nosniff`, no-referrer,
+frame denial, and a self-only Content Security Policy without inline script access.
+Project content is inserted as text, never executable HTML.
+
+### Resource limits and recovery
+
+The HTTP server sets a 16 KiB header limit, five-second header timeout,
+15-second request-read timeout, 20-second response-write timeout, and 30-second
+idle timeout. URLs are limited to 4096 bytes (414); bodies over 1 MiB receive 413.
+At most four project reads run concurrently; excess reads receive 503 `BUSY`
+with `Retry-After: 1`.
+
+Startup and each project read have a 15-second context deadline, at most 2 MiB per
+config/ticket file, 32 MiB total input, and 20,000 direct `.wrk` directory entries
+(including ignored entries). Hitting a project read limit produces `RESOURCE_LIMIT`
+and no healthy partial result. Use the CLI for larger projects or reduce input sizes.
+These are server resource limits, not changes to the file format or ordinary CLI.
+Cancellation is checked during reads, inventory scanning, and between validation
+phases; individual YAML parsing/graph operations and filesystem syscalls are not
+preemptible. Avoid unstable directory aliases or nonlocal filesystems.
+
+For runtime diagnostics, inspect the named file and `wrk validate`; restore a
+known-good file or obtain authorized repair, then reload. For 403, use the exact
+printed URL. For `LISTEN`, stop the conflicting process or choose another port.
+Automatic recovery/reconnect display will be expanded with live updates.
 
 ## Version and upgrade
 
@@ -147,8 +278,8 @@ or failed stdout may not emit a report, so inspect the installed version first.
 | `BUSY`, `CONFLICT` | Wait for other work to finish, inspect the installed version, then rerun that binary. |
 | `DURABILITY_UNCERTAIN`, `CLEANUP_FAILED` | Inspect the publication marker and installed version; resolve directory/stage issues before retrying. |
 
-All operational failures exit 1 and usage errors exit 2. JSON remains a single
-envelope on stdout with no routine stderr messages.
+All operational failures exit 1 and usage errors exit 2. Version/upgrade JSON
+remains a single envelope on stdout with no routine stderr messages.
 
 Titles are nonblank single-line strings; supplied spacing is retained. Priorities
 are `low`, `normal`, `high`, `urgent`; statuses are `todo`, `in-progress`, `blocked`,
@@ -358,7 +489,8 @@ Human lists show ID, status, priority, title, and blockers. `show` separates der
 information from source. Terminal controls are escaped in human output. JSON uses
 standard escaping and retains source content exactly.
 
-JSON is exactly one object plus newline on stdout, including ordinary failures;
+Except for [serve lifecycle events](#serve-output), JSON is exactly one object
+plus newline on stdout, including ordinary failures;
 there is no duplicate routine stderr diagnostic. Human errors go to stderr.
 There are no prompts, progress messages, or incidental timestamps.
 
@@ -404,6 +536,7 @@ and never cause omitted source fields to be inserted during updates.
 | `update` (single ticket) | `ticket`, `changed` |
 | `update --recursive` | `root_id`, `updates` array of `{ticket, changed, publication}`, overall `changed` |
 | `validate` | `valid: true`, `ticket_count` |
+| `serve` | Lifecycle `event` and `url`; see [serve output](#serve-output). |
 | Help | `usage` string |
 
 `show.source` includes every custom value and the body; no lossy custom YAML-to-JSON

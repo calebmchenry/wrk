@@ -8,6 +8,7 @@ Use this project's own CLI to track work in [`.wrk/`](../.wrk/). Follow the [dai
 - [Project configuration](configuration.md)
 - [Explicit project/config selection and path behavior](cli.md#project-selection)
 - [CLI commands and output contract](cli.md)
+- [Local server, read APIs, lifecycle output, and resource limits](cli.md#local-server)
 - [Body updates](cli.md#body-updates-and-revisions) and [stale-edit revisions](storage.md#item-revisions-and-stale-edits)
 - [Parent and dependency edits](cli.md#relationship-updates) and [typed custom fields](cli.md#custom-field-input-and-updates)
 - [Storage, concurrency, and recovery](storage.md)
@@ -100,7 +101,7 @@ Release and upgrade work:
 Local web workspace:
 
 - [wrk-a1561423: Serve a local web workspace with live agent updates](../.wrk/wrk-a1561423.md) — local-only server, explicit project/config selection, bundled browser UI, live changes from agents, safe editing, and related links. Eight child tickets carry implementation and verification; the milestone contains their dependency order.
-- [wrk-4036f7d4: Web workspace discovery](../.wrk/wrk-4036f7d4.md) — confirmed user intent and scope decisions. These are backlog requirements, not currently available commands.
+- [wrk-4036f7d4: Web workspace discovery](../.wrk/wrk-4036f7d4.md) — confirmed user intent and scope decisions. `serve` now provides the local shell/read APIs; full browsing, live refresh, and editing remain in the backlog.
 - List the complete batch with `go run ./cmd/wrk list --all --label web`; select ready implementation work with `go run ./cmd/wrk list --ready --under wrk-a1561423`.
 
 ## Sprint plans

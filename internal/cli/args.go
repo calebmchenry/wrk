@@ -2,10 +2,12 @@ package cli
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 	"wrk/internal/project"
 	"wrk/internal/ticket"
+	"wrk/internal/web"
 )
 
 type Request struct {
@@ -19,11 +21,14 @@ type Request struct {
 	Dependencies, AddDependencies, RemoveDependencies  []string
 	Fields                                             []ticket.FieldValue
 	RemoveFields                                       []string
+	Port                                               int
+	Open                                               bool
 }
 
 var commandFlags = map[string]map[string]bool{
 	"version": {}, "upgrade": {"check": false},
-	"init": {}, "new": {"body-file": true, "parent": true, "priority": true, "label": true, "no-labels": false, "depends-on": true, "field": true},
+	"serve": {"port": true, "open": false},
+	"init":  {}, "new": {"body-file": true, "parent": true, "priority": true, "label": true, "no-labels": false, "depends-on": true, "field": true},
 	"list": {"all": false, "ready": false, "label": true, "under": true}, "show": {},
 	"update": {"title": true, "status": true, "body-file": true, "priority": true, "label": true, "no-labels": false, "add-label": true, "remove-label": true, "recursive": false,
 		"parent": true, "no-parent": false, "add-dependency": true, "remove-dependency": true, "field": true, "remove-field": true},
@@ -36,11 +41,11 @@ var repeatableFlags = map[string]bool{
 }
 
 var projectCommands = map[string]bool{
-	"new": true, "list": true, "show": true, "update": true, "validate": true,
+	"new": true, "list": true, "show": true, "update": true, "validate": true, "serve": true,
 }
 
 func Parse(args []string) (Request, error) {
-	r := Request{Labels: []string{}}
+	r := Request{Labels: []string{}, Port: web.DefaultPort}
 	seen := map[string]bool{}
 	options := true
 	for i := 0; i < len(args); i++ {
@@ -83,6 +88,14 @@ func Parse(args []string) (Request, error) {
 				return r, fmt.Errorf("--%s does not take a value", name)
 			}
 			switch name {
+			case "port":
+				port, err := strconv.ParseUint(value, 10, 16)
+				if err != nil {
+					return r, fmt.Errorf("--port requires an integer from 0 to 65535 (0 allocates a port)")
+				}
+				r.Port = int(port)
+			case "open":
+				r.Open = true
 			case "project":
 				r.Selection.Project = &value
 			case "config":

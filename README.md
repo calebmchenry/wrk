@@ -41,7 +41,7 @@ wrk upgrade --check --json
 ```
 
 These commands work outside a project and inside an invalid/newer-format project.
-Only `upgrade` contacts the network. Checks exit 0 whether a newer version exists
+Only `upgrade` contacts an external service. Checks exit 0 whether a newer version exists
 or not; failures exit 1 and invalid arguments exit 2. Upgrades never downgrade.
 An unknown/development version reports availability as unknown; development,
 snapshot, and `go run` builds must be installed manually. A binary predating the
@@ -101,8 +101,8 @@ wrk validate
 ```
 
 From another directory, select the existing project with `--project directory`
-or `--config directory/.wrk/config.yaml` on `new`, `list`, `show`, `update`, and
-`validate`. Selectors work before or after the command:
+or `--config directory/.wrk/config.yaml` on `new`, `list`, `show`, `update`,
+`validate`, and `serve`. Selectors work before or after the command:
 
 ```sh
 wrk --project '/path/to/my project' list --ready
@@ -239,6 +239,26 @@ comparison and replacement; that race is not protected. If an error reports
 Ignore `**/.wrk/.lock` and `**/.wrk/.wrk-stage-*` in other projects' `.gitignore`.
 These runtime files are ignored by ticket scanning. See [storage and recovery](docs/storage.md)
 for filesystem support, concurrency limits, permissions, and interruption handling.
+
+## Local browser workspace preview
+
+```sh
+wrk serve                         # 127.0.0.1:7331
+wrk serve --port 0 --open          # allocate a port and open the browser
+wrk serve --project '/path/to/project'
+```
+
+The server prints the selected absolute project path and usable local URL.
+It serves one existing project and embeds all browser assets in the executable.
+The current page shows project identity, item count, and validation diagnostics
+with manual reload. Read APIs expose items, revisions, hierarchy, blockers, and
+configuration; full browsing, live updates, and editing are subsequent work.
+
+CLI/agent edits can continue while it runs. Port conflicts fail without switching;
+`--open` is optional and a browser-launch failure leaves the URL usable. Ctrl-C
+stops the server. `serve --json` emits newline-delimited startup/warning/shutdown
+events. See the [server and API contract](docs/cli.md#local-server) for limits,
+same-origin protections, output details, and recovery.
 
 ## Developing wrk with wrk
 

@@ -15,6 +15,7 @@ Usage:
   wrk version | --version
   wrk upgrade [--check]
   wrk init [directory]
+  wrk serve [--port 0..65535] [--open]
   wrk new "Title" [--body-file path|-] [--parent id] [--priority value]
                   [--label value ... | --no-labels] [--depends-on id ...]
                   [--field name=YAML ...]
@@ -31,7 +32,7 @@ Usage:
   wrk validate
   wrk help [command]
 
-Project selection for new, list, show, update, and validate:
+Project selection for new, list, show, update, validate, and serve:
   --project directory | --config directory/.wrk/config.yaml
 Selectors may precede or follow the command and override cwd discovery.
 Relative paths (including --body-file) resolve from the invocation directory.
@@ -58,6 +59,12 @@ Removing an absent field is a no-op; use explicit null to store a YAML null valu
 
 Version and upgrade work without a project. Upgrade --check writes no files.
 Upgrade installs the latest stable release for standalone release binaries only.
+
+Serve binds only 127.0.0.1 (default port 7331; 0 allocates a port).
+The bundled local page needs no separate installation. --open opts into opening
+the printed URL in a browser. Ctrl-C stops the server. Serve --json emits one
+envelope per line: started, optional warning, then stopped (or error).
+Failures before listening use the ordinary single error envelope.
 
 Every command supports --json and --help. Flags may precede or follow
 positional arguments. Use --flag=value or -- to end option parsing.
