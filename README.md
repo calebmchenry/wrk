@@ -215,6 +215,18 @@ Keep handoffs in ticket bodies. Follow the [full agent burn loop](docs/burns.md)
 for safe resumption and stop rules. These are CLI primitives and a workflow;
 there is no built-in AI runner or scheduler.
 
+For a simple standalone Codex loop, run this from the checkout root:
+
+```sh
+python3 scripts/ticket-burn.py \
+  --list-command 'go run ./cmd/wrk list --ready --label web --json'
+```
+
+It starts a fresh `codex exec` with full local access and no approval prompts,
+sends `Implement <ticket-id>`, checks that the ticket is done, and queries again.
+Progress and complete child logs go to `.wrk-burn/`.
+Add `--max-tickets 1` for a trial run. See [runner usage and stopping behavior](docs/burns.md#minimal-codex-runner).
+
 Recursive labeling publishes one file at a time under one writer lock. On a
 partial failure, output identifies committed, unchanged, and pending tickets.
 Inspect the entire scope and resolve the error before retrying the same idempotent
@@ -294,6 +306,7 @@ go test -count=1 ./...
 go test -race -count=1 ./...
 go vet ./...
 go build -o ./bin/wrk ./cmd/wrk
+python3 -B -m unittest discover -s scripts -p 'test_ticket_burn.py' -v
 node --test internal/web/model.test.mjs
 ```
 

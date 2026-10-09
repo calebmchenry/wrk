@@ -31,6 +31,8 @@ jobs:
         run: go test -race -count=1 ./...
       - name: Vet
         run: go vet ./...
+      - name: Ticket burn runner (fake commands only)
+        run: python3 -B -m unittest discover -s scripts -p 'test_ticket_burn.py' -v
       - name: Project validation
         run: go run ./cmd/wrk validate
       - name: Build and smoke-test development binary

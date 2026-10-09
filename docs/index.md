@@ -17,6 +17,7 @@ Use this project's own CLI to track work in [`.wrk/`](../.wrk/). Follow the [dai
 - [Release packaging, publication, and upgrade verification](releases.md)
 - [v0.1.0 platform and upgrade verification evidence](release-verification.md)
 - [Scoped agent burn loop and durable handoffs](burns.md)
+- [Minimal command-driven Codex runner](burns.md#minimal-codex-runner)
 - [Development checks and integration-test cache behavior](../README.md#developing-wrk-with-wrk)
 
 Agents may edit ticket bodies directly. Creation and changes to frontmatter, relationships, or status go through the CLI. Project configuration may be edited directly.

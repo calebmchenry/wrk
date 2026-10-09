@@ -2,6 +2,7 @@
 /dist/
 **/.wrk/.lock
 **/.wrk/.wrk-stage-*
+/.wrk-burn/
 
 /node_modules/
 /playwright-report/
