@@ -52,4 +52,3 @@ Make the README explain what wrk is, who it helps, why to use it, and how to get
 ## Remaining work
 
 None for the documentation task.
-
