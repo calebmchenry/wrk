@@ -1,10 +1,25 @@
 Standalone wrk binaries for macOS and Linux on amd64 and arm64. Go is not required.
 
-- Track local project work with validated Markdown tickets, scopes, labels, and metadata updates.
-- Inspect build provenance with `wrk version` or `wrk --version`.
-- Check for a newer stable release with `wrk upgrade --check`.
-- Install a verified release with `wrk upgrade`, using checksum verification and atomic replacement.
-- Version and upgrade commands work without a project, including inside invalid or newer-format projects.
+## New in v0.2.0
+
+- Open a bundled local browser workspace with `wrk serve --open`. Search and filter
+  tickets, expand parent/child rows, create tickets and inline children, and edit
+  details directly. Agent and filesystem changes appear automatically, with
+  conflict detection to protect unsaved drafts.
+- Run a command for a ticket or filtered scope with `wrk run`. Continuous polling,
+  expected-status checks, per-ticket logs, progress output, and JSON events support
+  agent workflows. The Codex ticket-burn wrapper now uses this runner.
+- Create and update parent relationships, dependencies, related-ticket links,
+  priorities, labels, and typed custom fields through the CLI.
+- Replace ticket bodies with `--body-file` and select projects explicitly with
+  `--project` or `--config`.
+
+## Install or upgrade
+
+Existing standalone release installations can run `wrk upgrade --check` to check
+availability and `wrk upgrade` to install the latest stable release with checksum
+verification and atomic replacement. Run `wrk version` to inspect the installed
+version and commit.
 
 Verify your platform archive against the accompanying SHA-256 manifest before
 manual installation. Binaries predating the upgrade command need one manual install.
