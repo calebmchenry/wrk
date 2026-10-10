@@ -19,6 +19,8 @@ type File struct {
 	Info os.FileInfo
 }
 type Snapshot struct {
+	ctx         context.Context
+	limits      ReadLimits
 	Root        string
 	Config      *Config
 	Files       map[string]File
@@ -26,6 +28,7 @@ type Snapshot struct {
 	Tickets     []*ticket.Ticket
 	ByID        map[string]*ticket.Ticket
 	Diagnostics []diagnostic.Diagnostic
+	related     map[string][]string
 }
 
 func candidateNames(dir string) ([]string, error) {
@@ -81,7 +84,7 @@ var errReadLimit = errors.New("project read limit exceeded; reduce project/file 
 // LoadContext uses the same strict validation as Load, with cancellation between
 // file reads and validation phases. YAML parsing itself is not preemptible.
 func LoadContext(ctx context.Context, root string, limits ReadLimits) *Snapshot {
-	s := &Snapshot{Root: root, Files: map[string]File{}, Names: []string{}, Tickets: []*ticket.Ticket{}, ByID: map[string]*ticket.Ticket{}, Diagnostics: []diagnostic.Diagnostic{}}
+	s := &Snapshot{ctx: ctx, limits: limits, Root: root, Files: map[string]File{}, Names: []string{}, Tickets: []*ticket.Ticket{}, ByID: map[string]*ticket.Ticket{}, Diagnostics: []diagnostic.Diagnostic{}}
 	abort := func(err error, path string) bool {
 		code := ""
 		if errors.Is(err, errReadLimit) {
@@ -167,7 +170,7 @@ func LoadContext(ctx context.Context, root string, limits ReadLimits) *Snapshot 
 			graphAvailable = false
 		}
 		for _, d := range ds {
-			if d.Field == "id" || d.Field == "parent" || d.Field == "depends_on" || d.Field == "" {
+			if d.Field == "id" || d.Field == "parent" || d.Field == "depends_on" || d.Field == "related" || d.Field == "" {
 				graphAvailable = false
 			}
 		}
@@ -207,7 +210,11 @@ func LoadContext(ctx context.Context, root string, limits ReadLimits) *Snapshot 
 // Compare checks every validation input, including inventory, byte content,
 // inode identity, and mode. Timestamp equality is deliberately insufficient.
 func (s *Snapshot) Compare() error {
-	names, err := candidateNames(filepath.Join(s.Root, ".wrk"))
+	ctx := s.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	names, err := candidateNamesContext(ctx, filepath.Join(s.Root, ".wrk"), s.limits.DirectoryEntries)
 	if err != nil {
 		return fmt.Errorf("CONFLICT: ticket inventory changed: %w", err)
 	}
@@ -226,7 +233,8 @@ func (s *Snapshot) Compare() error {
 	sort.Strings(paths)
 	for _, path := range paths {
 		original := s.Files[path]
-		data, info, err := readRegular(filepath.Join(s.Root, filepath.FromSlash(path)))
+		// A comparison never needs more than the original length plus one byte.
+		data, info, err := readRegularContext(ctx, filepath.Join(s.Root, filepath.FromSlash(path)), int64(len(original.Data))+1)
 		if err != nil || !bytes.Equal(data, original.Data) || !os.SameFile(info, original.Info) || info.Mode() != original.Info.Mode() {
 			return fmt.Errorf("CONFLICT: %s changed since validation", path)
 		}
@@ -235,6 +243,18 @@ func (s *Snapshot) Compare() error {
 }
 
 func (s *Snapshot) Candidate(path string, data []byte) (*ticket.Ticket, []diagnostic.Diagnostic) {
+	var total int64 = int64(len(data))
+	for name, file := range s.Files {
+		if name != path {
+			total += int64(len(file.Data))
+		}
+	}
+	if (s.limits.FileBytes > 0 && int64(len(data)) > s.limits.FileBytes) || (s.limits.TotalBytes > 0 && total > s.limits.TotalBytes) {
+		return nil, []diagnostic.Diagnostic{diagnostic.New("RESOURCE_LIMIT", "candidate exceeds server project/file size limits; use the CLI", path)}
+	}
+	if s.ctx != nil && s.ctx.Err() != nil {
+		return nil, []diagnostic.Diagnostic{diagnostic.New("CANCELED", "mutation canceled before publication", path)}
+	}
 	t, ds := ticket.Parse(data, path)
 	ds = append(ds, ticket.Validate(t, s.Config.Fields)...)
 	if len(ds) > 0 {

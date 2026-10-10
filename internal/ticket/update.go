@@ -70,14 +70,29 @@ type Changes struct {
 	AddDependencies, RemoveDependencies []string
 	Fields                              []FieldValue
 	RemoveFields                        []string
+	AddRelated, RemoveRelated           []string
+	NoRelated                           bool
 }
 
 func (c Changes) Validate() error {
-	if !c.HasNonLabelChanges() && !c.LabelsSet && len(c.AddLabels) == 0 && len(c.RemoveLabels) == 0 {
+	if !c.HasChanges() {
 		return fmt.Errorf("update requires at least one body or metadata change (see wrk help update)")
 	}
 	if c.Body != nil && !utf8.ValidString(*c.Body) {
 		return ErrInvalidBody
+	}
+	if c.NoRelated && (len(c.AddRelated) > 0 || len(c.RemoveRelated) > 0) {
+		return fmt.Errorf("--no-related conflicts with --add-related/--remove-related")
+	}
+	for _, id := range append(append([]string{}, c.AddRelated...), c.RemoveRelated...) {
+		if !IDPattern.MatchString(id) {
+			return fmt.Errorf("related links require a ticket ID, got %q", id)
+		}
+	}
+	for _, id := range c.AddRelated {
+		if slices.Contains(c.RemoveRelated, id) {
+			return fmt.Errorf("cannot add and remove the same related item %q", id)
+		}
 	}
 	if c.Parent != nil && c.NoParent {
 		return fmt.Errorf("--parent and --no-parent conflict")
@@ -113,9 +128,17 @@ func (c Changes) Validate() error {
 	return nil
 }
 
+func (c Changes) HasChanges() bool {
+	return c.HasNonLabelChanges() || c.LabelsSet || len(c.AddLabels) > 0 || len(c.RemoveLabels) > 0
+}
+
 func (c Changes) HasNonLabelChanges() bool {
 	return c.Body != nil || c.Title != nil || c.Status != nil || c.Priority != nil || c.Parent != nil || c.NoParent ||
-		len(c.AddDependencies) > 0 || len(c.RemoveDependencies) > 0 || len(c.Fields) > 0 || len(c.RemoveFields) > 0
+		c.HasRelatedChanges() || len(c.AddDependencies) > 0 || len(c.RemoveDependencies) > 0 || len(c.Fields) > 0 || len(c.RemoveFields) > 0
+}
+
+func (c Changes) HasRelatedChanges() bool {
+	return c.NoRelated || len(c.AddRelated) > 0 || len(c.RemoveRelated) > 0
 }
 
 func stringNode(s string) *yaml.Node {
@@ -165,6 +188,15 @@ func PatchChanges(t *Ticket, c Changes) ([]byte, bool, error) {
 		changes["depends_on"] = stringListNode(nextDependencies)
 	}
 
+	related, _ := schema.StringList(old["related"], true)
+	nextRelated := editList(related, c.AddRelated, c.RemoveRelated)
+	if c.NoRelated {
+		nextRelated = nil
+	}
+	if !slices.Equal(related, nextRelated) {
+		changes["related"] = stringListNode(nextRelated)
+	}
+
 	n := clone(t.Node, map[*yaml.Node]*yaml.Node{})
 	m := schema.Map(n)
 	fields, fieldsChanged := patchFields(m["fields"], c.Fields, c.RemoveFields)
@@ -178,7 +210,7 @@ func PatchChanges(t *Ticket, c Changes) ([]byte, bool, error) {
 	if len(changes) == 0 && bytes.Equal(body, t.Body) {
 		return bytes.Clone(t.Source), false, nil
 	}
-	for _, key := range []string{"title", "status", "priority", "labels", "parent", "depends_on", "fields"} {
+	for _, key := range []string{"title", "status", "priority", "labels", "parent", "depends_on", "related", "fields"} {
 		if v, changed := changes[key]; changed {
 			setMapEntry(n, key, v)
 		}

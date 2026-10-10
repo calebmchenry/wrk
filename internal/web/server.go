@@ -1,5 +1,5 @@
-// Package web serves one fixed project over loopback HTTP. It never takes a
-// writer lock or resolves a filesystem root from a request.
+// Package web serves one fixed project over loopback HTTP. Reads never take a
+// writer lock; requests cannot change the selected filesystem root.
 package web
 
 import (

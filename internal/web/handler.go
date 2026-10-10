@@ -18,7 +18,7 @@ import (
 	"wrk/internal/ticket"
 )
 
-//go:embed assets/index.html assets/app.js assets/model.mjs assets/live.mjs assets/style.css
+//go:embed assets/index.html assets/app.js assets/model.mjs assets/live.mjs assets/editor.mjs assets/pickers.mjs assets/detail.mjs assets/inline.mjs assets/style.css
 var assets embed.FS
 
 type response struct {
@@ -32,10 +32,11 @@ type response struct {
 type handler struct {
 	root, authority string
 	reads           chan struct{}
+	writes          chan struct{}
 }
 
 func newHandler(root, authority string) *handler {
-	return &handler{root: root, authority: authority, reads: make(chan struct{}, MaxConcurrentReads)}
+	return &handler{root: root, authority: authority, reads: make(chan struct{}, MaxConcurrentReads), writes: make(chan struct{}, 1)}
 }
 
 func reply(w http.ResponseWriter, status int, root *string, result any, ds []diagnostic.Diagnostic) {
@@ -51,7 +52,7 @@ func fail(w http.ResponseWriter, status int, root *string, code, message string)
 	reply(w, status, root, nil, []diagnostic.Diagnostic{diagnostic.New(code, message, "")})
 }
 
-// checkOrigin is shared by all routes, including future mutation endpoints.
+// checkOrigin is shared by all routes, including mutation endpoints.
 // Unsafe methods require an explicit exact Origin and JSON content type; no
 // CORS exceptions, same-site exceptions, or Referer fallback are allowed.
 func (h *handler) checkOrigin(r *http.Request) bool {
@@ -73,9 +74,14 @@ func (h *handler) checkOrigin(r *http.Request) bool {
 		if len(origins) != 1 {
 			return false
 		}
-		typ, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-		if err != nil || typ != "application/json" {
+		typ, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if len(r.Header.Values("Content-Type")) != 1 || err != nil || typ != "application/json" {
 			return false
+		}
+		for name, value := range params {
+			if name != "charset" || !strings.EqualFold(value, "utf-8") {
+				return false
+			}
 		}
 	}
 	return true
@@ -101,9 +107,18 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusRequestEntityTooLarge, &h.root, "RESOURCE_LIMIT", "request body exceeds 1 MiB")
 		return
 	}
+	if r.URL.RawPath != "" {
+		fail(w, 404, &h.root, "NOT_FOUND", "unknown route or invalid item ID")
+		return
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		fail(w, http.StatusMethodNotAllowed, &h.root, "METHOD_NOT_ALLOWED", "only GET and HEAD reads are available")
+		id, allowed := mutationRoute(r.URL.Path)
+		if (r.Method == http.MethodPost && r.URL.Path == "/api/items") || (r.Method == http.MethodPatch && id != "") {
+			h.mutate(w, r, id)
+			return
+		}
+		w.Header().Set("Allow", allowed)
+		fail(w, http.StatusMethodNotAllowed, &h.root, "METHOD_NOT_ALLOWED", "unsupported method for this route")
 		return
 	}
 	if r.ContentLength != 0 || len(r.TransferEncoding) > 0 {
@@ -112,17 +127,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// No redirect/clean-path router or filesystem server: only these exact assets.
-	if r.URL.RawPath != "" {
-		fail(w, http.StatusNotFound, &h.root, "NOT_FOUND", "unknown route or invalid item ID")
-		return
-	}
-	if file, ok := map[string]string{"/": "index.html", "/app.js": "app.js", "/model.mjs": "model.mjs", "/live.mjs": "live.mjs", "/style.css": "style.css"}[r.URL.Path]; ok {
+	if file, ok := map[string]string{"/": "index.html", "/app.js": "app.js", "/model.mjs": "model.mjs", "/live.mjs": "live.mjs", "/editor.mjs": "editor.mjs", "/pickers.mjs": "pickers.mjs", "/detail.mjs": "detail.mjs", "/inline.mjs": "inline.mjs", "/style.css": "style.css"}[r.URL.Path]; ok {
 		if r.URL.RawQuery != "" {
 			fail(w, 400, &h.root, "BAD_REQUEST", "this route does not accept query parameters")
 			return
 		}
 		data, _ := assets.ReadFile("assets/" + file)
-		contentType := map[string]string{"index.html": "text/html; charset=utf-8", "app.js": "text/javascript; charset=utf-8", "model.mjs": "text/javascript; charset=utf-8", "live.mjs": "text/javascript; charset=utf-8", "style.css": "text/css; charset=utf-8"}[file]
+		contentType := map[string]string{"index.html": "text/html; charset=utf-8", "app.js": "text/javascript; charset=utf-8", "model.mjs": "text/javascript; charset=utf-8", "live.mjs": "text/javascript; charset=utf-8", "editor.mjs": "text/javascript; charset=utf-8", "pickers.mjs": "text/javascript; charset=utf-8", "detail.mjs": "text/javascript; charset=utf-8", "inline.mjs": "text/javascript; charset=utf-8", "style.css": "text/css; charset=utf-8"}[file]
 		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Content-Length", fmt.Sprint(len(data)))
 		if r.Method != http.MethodHead {
@@ -250,7 +261,10 @@ func itemDetail(s *project.Snapshot, t *ticket.Ticket) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	dependencies, dependents := []project.Summary{}, []project.Summary{}
+	dependencies, dependents, related := []project.Summary{}, []project.Summary{}, []project.Summary{}
+	for _, id := range s.RelatedIDs(t.ID) {
+		related = append(related, s.Summary(s.ByID[id]))
+	}
 	var parent *project.Summary
 	if t.Parent != nil {
 		p := s.Summary(s.ByID[*t.Parent])
@@ -269,7 +283,7 @@ func itemDetail(s *project.Snapshot, t *ticket.Ticket) (any, error) {
 	return map[string]any{
 		"ticket": s.Summary(t), "body": string(t.Body), "body_html": bodyHTML,
 		"source": string(t.Source), "metadata": string(t.Source[:len(t.Source)-len(t.Body)]),
-		"parent": parent, "children": s.Children(t.ID), "dependencies": dependencies, "dependents": dependents,
+		"parent": parent, "children": s.Children(t.ID), "dependencies": dependencies, "dependents": dependents, "related": related,
 	}, nil
 }
 

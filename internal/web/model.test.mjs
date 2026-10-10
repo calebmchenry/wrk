@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readState, stateHash, indexItems, selectItems, progress } from './assets/model.mjs';
+import { readState, stateHash, indexItems, selectItems, treeRows, fuzzyTitle, progress } from './assets/model.mjs';
 
 const item = (id, status, extra = {}) => ({ id, title: id, status, body: '', labels: [], blockers: [], parent: null, ...extra });
 const items = [item('root', 'in-progress', { labels: ['web'] }),
@@ -12,31 +12,94 @@ const items = [item('root', 'in-progress', { labels: ['web'] }),
 const index = indexItems(items);
 const ids = overrides => selectItems(index, { ...readState(''), ...overrides }).map(i => i.id);
 
-test('status, body/title/ID search, exact AND labels and focus intersect', () => {
-  assert.deepEqual(ids({}), ['root', 'child', 'grandchild', 'waiting', 'manual']);
+test('status, fuzzy titles, exact AND tags and descendant-only Under intersect', () => {
+  assert.deepEqual(ids({}), ['child', 'grandchild', 'manual', 'root', 'waiting']);
   assert.equal(ids({ view: 'all' }).length, 7);
   assert.deepEqual(ids({ view: 'ready' }), ['child']);
   assert.deepEqual(ids({ view: 'blocked' }), ['grandchild', 'manual']);
-  assert.deepEqual(ids({ q: 'NEEDLE', labels: ['web', 'CLI'], view: 'ready', focus: 'root' }), ['child']);
+  assert.deepEqual(ids({ q: 'CHD', labels: ['web', 'CLI'], view: 'ready', under: 'root' }), ['child']);
+  assert.deepEqual(ids({ q: 'needle' }), []);
   assert.deepEqual(ids({ labels: ['cli'] }), []);
-  assert.deepEqual(ids({ q: 'waiting' }), ['waiting']);
-  assert.deepEqual(ids({ focus: 'root' }), ['root', 'child', 'grandchild']);
-  assert.deepEqual(ids({ focus: 'root', view: 'all' }), ['root', 'child', 'grandchild', 'done', 'canceled']);
-  assert.deepEqual(ids({ focus: 'child', view: 'all' }), ['child', 'grandchild', 'done']);
-  assert.deepEqual(ids({ focus: 'missing' }), []);
+  assert.deepEqual(ids({ q: 'waiting', view: 'ready', under: 'root' }), []);
+  assert.deepEqual(ids({ under: 'root' }), ['child', 'grandchild']);
+  assert.deepEqual(ids({ under: 'root', view: 'all' }), ['canceled', 'child', 'done', 'grandchild']);
+  assert.deepEqual(ids({ under: 'child', view: 'all' }), ['done', 'grandchild']);
+  assert.deepEqual(ids({ under: 'missing' }), []);
   assert.equal(progress(index.children.get('child')), '1/2 children done');
   assert.equal(progress(index.children.get('root')), '0/2 children done');
 });
 
-test('fragment state round-trips labels and text without losing selection or filters', () => {
-  const state = { q: 'symbols & # + 🦊', view: 'all', labels: ['CLI', 'two words'], focus: 'root', item: 'done' };
-  assert.deepEqual(readState(stateHash(state)), state);
-  assert.deepEqual(readState('#view=unknown&label=x&label=x&label=&item=missing'), { ...readState(''), labels: ['x'], item: 'missing' });
+test('fuzzy rule is an ordered Unicode subsequence of the title only', () => {
+  for (const [title, query, expected] of [
+    ['Build search', 'BSRCH', true], ['Build search', ' search  ', true],
+    ['Build search', 'search build', false], ['Build search', 'bbb', false],
+    ['Build search', 'b s', true], ['Build search', '', true],
+    ['Ship 🦊 tools', '🦊t', true], ['Ångström', 'åö', true],
+  ]) assert.equal(fuzzyTitle(title, query), expected, `${title}: ${query}`);
+  const fixture = indexItems([item('needle', 'todo', { title: 'Ship tools', body: 'needle' })]);
+  assert.equal(selectItems(fixture, { ...readState(''), q: 'needle' }).length, 0);
 });
 
-test('deep hierarchy is iterative and includes the focus root', () => {
-  const chain = Array.from({ length: 10000 }, (_, n) => item(String(n), 'todo', { parent: n ? String(n - 1) : null }));
-  assert.equal(selectItems(indexItems(chain), { ...readState(''), focus: '0' }).length, 10000);
+test('fragments round-trip and legacy focus migrates without losing selection', () => {
+  const state = { q: 'symbols & # + 🦊', view: 'all', labels: ['CLI', 'two words'], under: 'root', item: 'done' };
+  assert.deepEqual(readState(stateHash(state)), state);
+  assert.deepEqual(readState('#view=unknown&label=x&label=x&label=&item=missing'), { ...readState(''), labels: ['x'], item: 'missing' });
+  assert.equal(readState('#focus=root&item=done').under, 'root');
+  assert.equal(readState('#under=child&focus=root').under, 'child');
+  assert.equal(stateHash(readState('#focus=root&item=done')), '#under=root&item=done');
+});
+
+const tree = (overrides = {}, collapsed = new Set(), source = index, pins = []) => treeRows(source, { ...readState(''), ...overrides }, collapsed, pins);
+const rowIDs = result => result.rows.map(row => row.item.id);
+test('stable preorder, context membership, collapse and expansion restoration', () => {
+  const collapsed = new Set(['root', 'child']);
+  assert.deepEqual(rowIDs(tree()), ['manual', 'root', 'child', 'grandchild', 'waiting']);
+  assert.deepEqual(rowIDs(tree({}, collapsed)), ['manual', 'root', 'waiting']);
+  assert.equal(tree({}, collapsed).matches.length, 5); // Includes matches hidden by collapse.
+  for (const filters of [{ q: 'gch' }, { labels: ['web'] }, { under: 'child' }, { view: 'blocked' }, { view: 'ready' }]) {
+    const result = tree(filters, collapsed);
+    assert.ok(result.rows.some(row => row.depth > 0));
+    assert.ok(result.rows.every(row => !row.hasChildren || row.expanded));
+  }
+  assert.deepEqual(rowIDs(tree({}, collapsed)), ['manual', 'root', 'waiting']);
+  assert.deepEqual([...collapsed], ['root', 'child']);
+  const under = tree({ under: 'child', view: 'all' });
+  assert.deepEqual(rowIDs(under), ['child', 'done', 'grandchild']);
+  assert.equal(under.rows[0].context, true);
+  assert.equal(under.rows[0].depth, 0);
+  assert.equal(under.matches.length, 2);
+  assert.deepEqual(rowIDs(tree({ under: 'missing' })), []);
+  assert.deepEqual(rowIDs(tree({ q: 'not present' })), []);
+});
+
+test('closed ancestors, live reparenting/status changes and creation pins preserve honest counts', () => {
+  const source = indexItems([item('a', 'done'), item('b', 'canceled', { parent: 'a' }),
+    item('c', 'todo', { parent: 'b' }), item('d', 'todo')]);
+  let result = tree({}, new Set(['a']), source);
+  assert.deepEqual(rowIDs(result), ['a', 'd']);
+  assert.equal(result.matches.length, 2);
+  result = tree({ q: 'c' }, new Set(['a']), source);
+  assert.deepEqual(rowIDs(result), ['a', 'b', 'c']);
+  assert.deepEqual(result.rows.map(row => row.context), [true, true, false]);
+  const changed = indexItems(source.items.map(i => i.id === 'c' ? { ...i, parent: 'd' } : i));
+  assert.deepEqual(rowIDs(tree({}, new Set(['a']), changed)), ['d', 'c']);
+  const completed = indexItems(changed.items.map(i => i.id === 'c' ? { ...i, status: 'done' } : i));
+  assert.deepEqual(rowIDs(tree({}, new Set(['a']), completed)), ['d']);
+  result = tree({ q: 'not present', under: 'd' }, new Set(['a']), source, ['c']);
+  assert.deepEqual(rowIDs(result), ['a', 'b', 'c']);
+  assert.equal(result.matches.length, 0);
+  assert.ok(result.rows.every(row => row.context));
+});
+
+test('10,000-deep hierarchy traversal, ancestor closure and collapse are iterative', () => {
+  const chain = indexItems(Array.from({ length: 10000 }, (_, n) => item(String(n), 'todo', { parent: n ? String(n - 1) : null })));
+  assert.equal(selectItems(chain, { ...readState(''), under: '0' }).length, 9999);
+  const result = tree({ q: '9999' }, new Set(['0']), chain);
+  assert.equal(result.rows.length, 10000);
+  assert.equal(result.matches.length, 1);
+  assert.equal(result.rows.at(-1).depth, 9999);
+  assert.equal(tree({}, new Set(['0']), chain).rows.length, 1);
+  assert.equal(tree({ under: '9900' }, new Set(['0']), chain).rows.length, 100);
 });
 
 // Manually clock the poller and settle individual reads: no race-prone sleeps.
@@ -133,4 +196,43 @@ test('a late timer after system sleep forces full resynchronization without brow
   assert.equal(h.reads[1].etag, '');
   await h.settle(1);
   h.poller.stop();
+});
+
+test('incoming related edits notify drafts without advancing either original revision', () => {
+  const guard = createDraftGuard();
+  let context;
+  guard.register({ id: 'draft', revision: 'source', relatedRevision: 'links-before', isDirty: () => true, onRemote: value => { context = value; } });
+  const index = indexItems([{ id: 'draft', revision: 'source', related_revision: 'links-after' }]);
+  guard.inspect(index, new Set(['draft']), false);
+  assert.equal(context.changed, true);
+  assert.equal(context.baseRevision, 'source');
+});
+
+import { draftPatch } from './assets/editor.mjs';
+import { detailValues, confirmedBaseline, reconcileDetail } from './assets/detail.mjs';
+test('confirmed metadata baselines preserve untouched CRLF bodies and never adopt a later poll', () => {
+  const initial = { title: 'Original', body: '\r\nExact\r\nbytes', status: 'todo', labels: ['old'], parent: null, depends_on: [], related: [] };
+  const base = detailValues(initial);
+  const typed = { ...base, title: 'Typed before and during save' };
+  const confirmed = confirmedBaseline(base, { status: 'done' }, { ...initial, status: 'done' });
+  assert.equal(confirmed.body, '\nExact\nbytes');
+  assert.deepEqual(draftPatch(confirmed, { ...typed, status: 'done' }), { title: 'Typed before and during save' });
+  assert.deepEqual(draftPatch(base, { ...base, body: '' }), { body: '' });
+  const submitted = confirmedBaseline(base, { body: 'Submitted body' }, initial);
+  assert.deepEqual(draftPatch(submitted, { ...base, body: 'More typing' }), { body: 'More typing' });
+});
+test('explicit review merges collection intent without losing external additions or text', () => {
+  const base = detailValues({ title: 'Old', body: 'Old body', status: 'todo', parent: null, labels: ['old'], depends_on: ['a'], related: ['b'] });
+  const mine = { ...base, title: 'My title', labels: ['mine'], depends_on: [], related: ['b', 'mine'] };
+  const reviewed = { ...base, title: 'Agent title', body: 'Agent body', status: 'done', labels: ['old', 'agent'], depends_on: ['a', 'agent'], related: ['b', 'agent'] };
+  assert.deepEqual(reconcileDetail(base, mine, reviewed), { ...reviewed, title: 'My title', labels: ['agent', 'mine'], depends_on: ['agent'], related: ['b', 'agent', 'mine'] });
+});
+test('pending writes defer revision notices until publication is resolved', () => {
+  const guard = createDraftGuard();
+  let saving = true;
+  guard.register({ id: 'draft', revision: 'before', isDirty: () => true, isSaving: () => saving, onRemote() {} });
+  const latest = indexItems([{ id: 'draft', revision: 'after' }]);
+  assert.equal(guard.inspect(latest, new Set()).changed, false);
+  saving = false;
+  assert.equal(guard.inspect(latest, new Set()).changed, true);
 });

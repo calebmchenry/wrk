@@ -1,105 +1,185 @@
 # Scoped agent burns
 
-A burn is an extended, explicitly scoped work session using ordinary wrk commands
-and durable ticket bodies. The CLI does not run AI, schedule sessions, grant
-permissions, or provide parallel task claiming. Use the [daily workflow](index.md#daily-workflow)
-and run this checkout's CLI from the repository root as `go run ./cmd/wrk`.
-Commands below abbreviate it to `wrk`.
+A burn is an extended, explicitly scoped work session using wrk commands and durable
+ticket bodies. `wrk run` executes a supplied command sequentially; it has no built-in
+AI provider, scheduler, or parallel ticket claiming. Follow the
+[daily workflow](index.md#daily-workflow). Commands below abbreviate this checkout's
+`go run ./cmd/wrk` to `wrk` unless shown in full.
 
 ## Minimal Codex runner
 
-[`scripts/ticket-burn.py`](../scripts/ticket-burn.py) runs one fresh Codex session
-per ticket. It requires Python 3.9+, the Codex CLI configured for noninteractive
-use, and macOS or Linux. From this checkout's root:
+From this checkout's root, the ordinary burn is now a native invocation:
 
 ```sh
-python3 scripts/ticket-burn.py \
-  --list-command 'go run ./cmd/wrk list --ready --label web --json'
+go run ./cmd/wrk run --ready --label web --expect-status done -- \
+  codex exec --dangerously-bypass-approvals-and-sandbox 'Implement {id}'
 ```
 
-Use `--under <parent-id>` instead of, or alongside, `--label` to select a hierarchy.
-Add `--max-tickets 1` for a single-ticket run. Selection is required; the script
-does not choose a scope for you.
+Each selected ticket gets one fresh Codex call with exactly `Implement <ticket-id>`
+as one argument. The supplied Codex flags preserve full local access without approval
+prompts. Configure Codex for noninteractive use beforehand. Repository instructions
+and the ticket define implementation and verification. Exit 0 alone is insufficient
+for a burn: `--expect-status done` checks the persisted ticket in the selected project
+before counting success and selecting again. Newly unblocked work can run next.
 
-Each pass runs the selection command, takes the first result, and starts
-`codex exec --dangerously-bypass-approvals-and-sandbox` with exactly
-`Implement <ticket-id>`. By default, child sessions have full local access with
-no Codex sandbox or approval prompts; no extra invocation flags are needed.
-Repository instructions and the ticket supply the implementation and verification
-workflow. The runner checks `wrk show <id> --json` for `done` before querying
-again, so newly unblocked tickets can appear on the next pass.
-
-The command must return the full successful `wrk list --json` envelope, including
-`project_root` and `result.tickets`. Order is preserved; ordinary wrk lists use
-ID order, not priority order. Selection and completion-check commands run in the
-directory where you launched the script. Codex runs in the envelope's project
-root, and every completion check explicitly selects that project. A query that
-switches projects stops the run.
-
-Commands are split into arguments with shell quoting supported; shell expansion,
-redirection, and pipelines are not implicit. For custom filtering, use a wrapper
-command that preserves the envelope. `--wrk-command` selects the executable and
-any prefix arguments used for `show`; it defaults to `go run ./cmd/wrk` when
-launched at this checkout's root and `wrk` elsewhere. For example, from another
-project with wrk installed:
+Selection uses native `list` semantics and ascending ID order, not priority order.
+`--ready` means todo with every dependency done and excludes in-progress work.
+Repeated labels require all values; `--under` selects descendants but excludes the
+parent itself. Combine them or bound a trial to one verified success:
 
 ```sh
-python3 /path/to/wrk/scripts/ticket-burn.py \
-  --list-command 'wrk list --ready --label maintenance --json' \
-  --max-tickets 3
+wrk run --ready --under <parent-id> --label web --label backend \
+  --max-tickets 1 --expect-status done -- \
+  codex exec --dangerously-bypass-approvals-and-sandbox 'Implement {id}'
 ```
 
-Use `--codex-command 'codex exec --dangerously-bypass-approvals-and-sandbox --model MODEL'` to
-customize Codex options. The runner appends the implementation prompt as a single
-argument and closes child stdin. Authentication and settings come from the
-existing Codex installation. An explicit `--codex-command` replaces the entire
-default command, including its permission flags.
-
-Console progress includes each ticket's ID/title, start, exit code, elapsed time,
-and a heartbeat every 60 seconds (`--heartbeat N` changes the interval). Logs go
-in `.wrk-burn/<timestamp>/` under the launch directory; `--log-dir PATH` changes
-the parent directory. `run.log` records progress plus list/show commands and
-outputs. `001-<ticket-id>.log`, etc. contain the full Codex stdout/stderr, command,
-and working directory. This repository ignores `.wrk-burn/`.
-
-The runner stops at the first command/JSON error, failed Codex invocation,
-unfinished ticket, repeated selection, or selected ticket outside `todo` and
-`in-progress`. It leaves the ticket's status to Codex and does not retry. Ctrl-C
-or SIGTERM stops the active command and its process group. The exit code is 0
-for an empty selection or the ticket limit, 1 for failure, 2 for invalid arguments,
-and 130 for interruption.
-
-An empty result prints **No matching tickets** and exits; it does not wait for
-future arrivals or imply all work is complete. In particular, `--ready` excludes
-in-progress tickets. After an interrupted or unfinished attempt, inspect and
-resume that ticket before running the ready queue again. Run one worker for a
-scope: this script does not claim tickets or coordinate concurrent agents.
-
-Test the runner without invoking real Codex or changing the backlog:
+Ordinary runs exit when no unprocessed matches remain. An empty ready queue does
+not establish project completion. Explicit continuous mode waits for previously
+unprocessed tickets to become eligible, polling only while idle:
 
 ```sh
+wrk run --ready --label maintenance --stream --poll-interval 5s \
+  --max-tickets 3 --expect-status done -- \
+  codex exec --dangerously-bypass-approvals-and-sandbox 'Implement {id}'
+```
+
+`--max-tickets` counts successful actions; it is a count of done tickets only when
+done was required and verified. It is not a wall-clock deadline: streaming can wait
+indefinitely without reaching the limit. Ctrl-C stops an idle wait or the active
+process group. One sequential runner does not claim tickets against another worker;
+coordinate workers externally and inspect existing in-progress work before a burn.
+
+For an unchanged-status review, omit the done requirement:
+
+```sh
+wrk run --all --under <parent-id> -- ./review-ticket '{id}'
+```
+
+Here success is exit 0 with a valid existing ticket. Each successful ID is processed
+once per invocation even if it still matches, leaves and re-enters the query, or is
+reopened. Streaming also skips those IDs across polls. A fresh invocation can visit
+them again. Failures stop immediately; no mode automatically retries.
+
+### Thin Python convenience wrapper
+
+[`scripts/ticket-burn.py`](../scripts/ticket-burn.py) is retained as an exec-only
+wrapper around `wrk run`. It requires Python 3.9+ and macOS/Linux. It adds the
+Codex command, the exact prompt, and the required done check; wrk owns all selection,
+process management, completion checks, logs, and output:
+
+```sh
+python3 scripts/ticket-burn.py --ready --label web --max-tickets 1
+python3 /path/to/wrk/scripts/ticket-burn.py --ready --label maintenance --stream
+```
+
+Pass at least one selector (`--ready`, `--all`, `--label`, `--under`, or `--ticket`).
+The wrapper forwards native filters, project/config selection, streaming, intervals,
+limits, `--log-dir`, `--verbose`, and `--json`. `--wrk-command` defaults to
+`go run ./cmd/wrk` when launched at this checkout's root and `wrk` elsewhere. An
+explicit command replaces that prefix. It now supplies the entire `run` invocation,
+not just a completion-check executable.
+
+`--codex-command 'codex exec --dangerously-bypass-approvals-and-sandbox --model MODEL'`
+customizes Codex options. It replaces the entire default, including permission flags;
+the wrapper appends `Implement {id}`. These two command strings support shell quoting
+to preserve argument boundaries, but never shell expansion. Use direct `wrk run` for
+other actions or success conditions; the wrapper always requires done.
+
+### Migration from the old script
+
+| Former interface/behavior | Current equivalent/change |
+| --- | --- |
+| `--list-command 'go run ./cmd/wrk list --ready --label web --json'` | Pass `--ready --label web` to the wrapper or the direct native invocation above. `--list-command` is rejected. |
+| Arbitrary external selection wrappers/custom ordering | No automatic mapping: choose supported native filters and ID ordering, or keep custom selection outside this workflow. wrk does not execute external list/show commands. |
+| `--wrk-command` for `show` only | Executable/prefix for the whole `wrk run`; use native `--project`/`--config` to pin the project. |
+| `--heartbeat 60` | `--heartbeat-interval 60s`; positive Go durations replace integer seconds. The old flag is rejected. |
+| `.wrk-burn/<timestamp>/` in launch cwd | `.wrk-runs/<timestamp>/` in the selected project; `--log-dir PATH` overrides the base relative to launch cwd. Existing logs are left in place. |
+| Combined `001-<id>.log` and list/show `run.log` | Separate numbered stdout/stderr files plus lifecycle `run.jsonl`; see the [log contract](cli.md#run-output-and-logs). |
+| Repeated selection was an error | Successful IDs are skipped for this invocation; unchanged-status reviews can drain normally. |
+| Empty selection always stopped | Ordinary mode still stops; explicit `--stream` waits for unprocessed eligible work. |
+| Script-specific status restrictions | Native query rules apply. Use `--ready` for implementation queues; explicit `--ticket` retries can select in-progress work. |
+
+Add `/.wrk-runs/` to the selected project's `.gitignore`. Keep `/.wrk-burn/` ignored
+if retaining old logs. No log format is a workflow checkpoint or resume database.
+
+### Arguments, execution, and output
+
+Direct `wrk run` requires `--` before the executable. Everything after it belongs
+to the child, including flags such as `--json`. Quote `'Implement {id}'` to preserve
+the prompt as one argument. Every literal `{id}` in child arguments is substituted;
+the executable itself is never substituted. There is no implicit shell, expansion,
+pipeline, redirection, dotenv loading, or interactive prompting. Exported environment
+and PATH are inherited, and child stdin is closed. A directly executed script needs
+executable permission and a valid interpreter/shebang; otherwise invoke the
+interpreter explicitly, for example `-- python3 'scripts/action with spaces.py' '{id}'`.
+
+Children run in the selected project root, so relative script paths, PATH entries,
+and child file arguments resolve there. CLI `--project`, `--config`, and `--log-dir`
+paths resolve from the invocation directory. From another directory, use a freshly
+built absolute wrk executable and `--project /path/to/project` (or its config).
+The runner holds no lifetime writer lock: children can invoke wrk mutations.
+Direct body/config edits and Git operations remain outside those mutations.
+
+Human progress reports selection, starts/finishes, elapsed time, output recency, idle
+reasons, and failure/retry guidance. Default child output is captured in full logs.
+`--verbose` mirrors child bytes to stderr and disables terminal line replacement.
+`--json` emits version-1 lifecycle NDJSON to stdout, including a final `finished`
+event with `outcome`; even with verbose, raw child output stays off JSON stdout.
+See [output fields, log paths, and failure details](cli.md#run-output-and-logs).
+
+SIGINT/SIGTERM stops the active process group, escalating to SIGKILL within two
+seconds for an unresponsive leader and cleaning up remaining group descendants.
+Partial changes remain. Exit codes are 0 for a drained query, success limit, or
+successful explicit ticket; 1 for execution/completion failures; 2 for usage errors;
+and 130 for interruption. For supervision that signals a single PID, use a compiled
+wrk binary via `--wrk-command /absolute/path/to/wrk` rather than the `go run` launcher.
+Use the compiled binary when exact exit codes matter too: `go run` can report a
+nonzero child status on stderr while itself exiting 1 (for example, usage status 2).
+
+### Inspection and explicit retry
+
+Exit 0 means the Codex session ended normally; it does not establish acceptance.
+If the required done check fails, read the numbered stdout/stderr logs and ticket
+handoff. The former workspace sandbox sometimes prevented required verification;
+full local access remains the supplied command's default, not a generic wrk setting.
+
+After inspecting and repairing partial work, retry the unfinished ticket explicitly:
+
+```sh
+wrk show <failed-id>
+wrk run --ticket <failed-id> --expect-status done -- \
+  codex exec --dangerously-bypass-approvals-and-sandbox 'Implement {id}'
+# Equivalent convenience wrapper:
+python3 scripts/ticket-burn.py --ticket <failed-id>
+```
+
+`--ticket` bypasses readiness without resetting status, and conflicts with query
+filters and streaming. A ready queue will not resume in-progress work automatically.
+Restart the queue after resolving the failed ticket and its verification.
+
+A multi-step action follows the same rule:
+
+```sh
+wrk run --ready --label maintenance --expect-status done -- \
+  /bin/sh 'scripts/implement and verify.sh' '{id}'
+# Inspect logs and durable results, repair the failure, then restart the WHOLE script:
+wrk run --ticket <failed-id> --expect-status done -- \
+  /bin/sh 'scripts/implement and verify.sh' '{id}'
+```
+
+The script must keep the ticket unfinished until all required steps succeed, check
+step failures, and mark done only at the end. Its author owns safe repetition of
+partial effects: for example, verify and reuse an existing first-step result before
+trying the second step again. Agent calls are not inherently idempotent. wrk provides
+no named steps, checkpoints, automatic retries, rollback, or automatic Git operations.
+
+[Integrated migration verification](burn-verification.md) maps disposable-project
+and fake-command checks to the workflow. No real Codex session is needed to run them:
+
+```sh
+go test -count=1 ./internal/runner ./internal/cli ./test/integration
 python3 -B -m unittest discover -s scripts -p 'test_ticket_burn.py' -v
 ```
-
-### When Codex exits 0 but the ticket stays in progress
-
-Exit 0 means the Codex session ended normally, not that the ticket met its
-acceptance criteria. Read the final response in the numbered ticket log and
-the ticket's handoff notes. The runner deliberately checks the persisted status.
-
-The former default `--sandbox workspace-write` could prevent verification needing
-local listeners, browser IPC, Docker sockets, or files outside its writable
-directories. A run on 2026-10-08 implemented `wrk-ce7350ff` but could not verify
-it: loopback binds returned `operation not permitted`, Chromium IPC was denied,
-and Docker was inaccessible. The child correctly left verification unfinished.
-
-The runner now defaults to full local access at the user's request; see the
-[official noninteractive permissions documentation](https://learn.chatgpt.com/docs/non-interactive-mode#permissions-and-safety).
-Resume a previously unfinished ticket directly with
-`codex exec --dangerously-bypass-approvals-and-sandbox 'Implement <ticket-id>'`.
-Once it is verified and marked done, restart the ready queue using the ordinary
-runner command. `--ready` will not resume it automatically, and unfinished
-dependencies may leave no ready tickets at all.
 
 ## Establish the session
 
@@ -189,7 +269,9 @@ An empty ready list is a signal to inspect, not evidence of completion. Inspect
 in-progress and blocked tickets, todos with unfinished dependencies, external
 prerequisites, and the selected root. Stop when all scoped work meets its criteria,
 when no authorized work can proceed, or when an explicit session limit is reached.
-Do not poll indefinitely, silently expand the batch, or mark unfinished work done.
+For bounded/manual burns, stop rather than polling indefinitely. Explicitly requested
+`wrk run --stream` may keep waiting within its fixed scope until interrupted, failed,
+or limited. Never silently expand the batch or mark unfinished work done.
 
 On a limit, leave actionable work in-progress with a durable next step. If nothing
 can proceed, identify the blockers and their unblocking conditions. Run

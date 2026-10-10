@@ -11,30 +11,36 @@
   <a class="skip-link" href="#workspace">Skip to workspace</a>
   <header class="topbar">
     <a class="wordmark" href="#" aria-label="wrk home">wrk<span>.</span></a>
-    <div class="project-heading"><p class="eyebrow">LOCAL WORKSPACE</p><h1 id="project-name">Your project</h1><p id="project" class="path">Connecting…</p></div>
-    <button id="reload" type="button">Reload project</button>
+    <h1 id="project-name">Your project</h1>
+    <div class="connection" data-state="connecting"><span class="connection-dot" aria-hidden="true"></span><span id="connection-label">Loading…</span><span id="status" class="sr-only" role="status">Loading project…</span></div>
+    <details id="project-menu" class="disclosure">
+      <summary aria-label="Project information and actions" title="Project information and actions">···</summary>
+      <div class="disclosure-panel"><p id="project" class="path">Connecting…</p><p id="project-info" class="hint"></p><button id="reload" type="button">Reload project</button></div>
+    </details>
+    <button id="new-item" type="button" aria-label="New item" disabled>+ New</button>
+    <p id="save-notice" role="status"></p>
   </header>
-  <div class="connection" data-state="connecting"><span class="connection-dot" aria-hidden="true"></span><span id="status" role="status">Loading project…</span><span class="manual-note">Automatic updates</span></div>
-  <section id="problem" role="alert" hidden><h2>Project needs attention</h2><pre id="diagnostics"></pre><p>Check the named files with <code>wrk validate</code>. Updates resume automatically after repair.</p></section>
+  <div class="filters" aria-label="Item filters">
+    <div class="view-tabs" role="group" aria-label="Item view" aria-describedby="view-help">
+      <button type="button" data-view="active" aria-pressed="true">Active</button><button type="button" data-view="all" aria-pressed="false">All</button><button type="button" data-view="ready" aria-pressed="false">Ready</button><button type="button" data-view="blocked" aria-pressed="false">Blocked</button>
+    </div>
+    <p id="view-help" class="sr-only">Todo, in progress, and manually blocked.</p>
+    <label for="search" class="sr-only">Search items</label><input id="search" type="search" placeholder="Search titles…" autocomplete="off">
+    <details id="label-filter" class="disclosure"><summary>Tags <span id="label-count"></span></summary><div class="disclosure-panel"><div id="label-options"></div><p class="hint">Match every selected tag, exactly.</p></div></details>
+    <div id="under-filter"><span>Under</span></div>
+    <button id="reset" class="text-button" type="button">Clear filters</button><div id="tag-chips" class="compact-chips" aria-label="Selected tag filters"></div>
+  </div>
+  <details id="problem" role="alert" hidden><summary id="problem-summary">Project needs attention</summary><pre id="diagnostics"></pre><p>Check the named files with <code>wrk validate</code>, or use Reload project in the project menu. Updates resume automatically after repair or reconnection.</p></details>
   <p id="draft-notice" role="status" hidden></p>
   <main id="workspace" aria-busy="true">
-    <aside id="browse" aria-label="Browse items">
-      <div class="filters">
-        <div class="section-heading"><h2>Items <span id="total" class="count"></span></h2><button id="reset" class="text-button" type="button">Reset filters</button></div>
-        <label for="search">Search items</label><input id="search" type="search" placeholder="Title, ID, or description" autocomplete="off">
-        <div class="view-tabs" role="group" aria-label="Item view">
-          <button type="button" data-view="active" aria-pressed="true">Active</button><button type="button" data-view="all" aria-pressed="false">All</button><button type="button" data-view="ready" aria-pressed="false">Ready</button><button type="button" data-view="blocked" aria-pressed="false">Blocked</button>
-        </div>
-        <p id="view-help" class="hint">Todo, in progress, and manually blocked.</p>
-        <details id="label-filter"><summary>Labels <span id="label-count"></span></summary><div id="label-options"></div><p class="hint">Match every selected label, exactly.</p></details>
-        <label for="focus">Parent focus</label><select id="focus"><option value="">Entire project</option></select>
-        <p class="hint">Parent + all descendants, intersected with filters.</p>
-      </div>
-      <p id="results" role="status">Loading items…</p>
-      <div id="list-scroll" tabindex="0" aria-label="Item list"><ul id="items"></ul><div id="empty" class="empty" hidden></div></div>
-    </aside>
-    <section id="detail" tabindex="-1" aria-label="Item detail"><div id="detail-content"><div class="empty detail-placeholder"><span class="empty-symbol" aria-hidden="true">↗</span><h2>Select an item</h2><p>Keep the work in view.<br>Choose an item to explore its description and connections.</p></div></div><div id="draft"></div></section>
+    <section id="browse" aria-label="Browse items">
+      <div class="list-heading"><h2>Items</h2><p id="results" role="status">Loading items…</p></div>
+      <div id="list-scroll" tabindex="0" aria-label="Item list"><ul id="items" aria-label="Work items"></ul><div id="empty" class="empty" hidden></div></div>
+    </section>
+    <section id="detail" tabindex="-1" aria-label="Item detail"><div id="detail-top"></div><p id="selection-context" class="hint" hidden></p><div id="draft"></div><div id="detail-content"></div></section>
   </main>
+  <dialog id="create-dialog" aria-label="New item"></dialog>
+  <div id="copy-feedback" role="status" hidden></div>
   <noscript>This workspace needs JavaScript. You can also browse with wrk list and wrk show.</noscript>
 </body>
 </html>

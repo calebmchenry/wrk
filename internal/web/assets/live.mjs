@@ -50,9 +50,9 @@ export function createPoller({ read, onData, onError, onChecking = () => {},
 export function createDraftGuard() {
   let draft;
   return {
-    register({ id, revision, isDirty, onRemote }) {
+    register({ id, revision, relatedRevision, isDirty, isSaving = () => false, onRemote }) {
       if (draft) throw new Error('A draft is already registered');
-      const current = { id, revision, isDirty, onRemote };
+      const current = { id, revision, relatedRevision, isDirty, isSaving, onRemote };
       draft = current;
       return () => { if (draft === current) draft = undefined; };
     },
@@ -60,8 +60,8 @@ export function createDraftGuard() {
       if (!draft) return null;
       const item = index?.byID.get(draft.id);
       const context = { id: draft.id, baseRevision: draft.revision, item,
-        dirty: draft.isDirty(), changed: Boolean(item && item.revision !== draft.revision),
-        missing: Boolean(index && !item), outsideFilters: Boolean(item && !visibleIDs.has(item.id)), stale };
+        dirty: draft.isDirty(), changed: Boolean(!draft.isSaving() && item && (item.revision !== draft.revision || (draft.relatedRevision !== undefined && item.related_revision !== draft.relatedRevision))),
+        missing: Boolean(draft.id && index && !item), outsideFilters: Boolean(item && !visibleIDs.has(item.id)), stale };
       draft.onRemote(context);
       return context;
     },

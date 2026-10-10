@@ -55,7 +55,13 @@ python3 scripts/verify-release.py dist
 
 Snapshot packaging may use a dirty tree; it is inspection evidence, not publishable
 release evidence. The verifier checks all archive names, checksums, entries, platform
-and build metadata, then executes the native asset. Cross-compilation/metadata
+and build metadata, then executes the native asset's version and workspace smoke
+checks. `scripts/verify-workspace.py` starts that extracted executable with an
+empty PATH in a disposable project outside the checkout, fetches the HTML/CSS and
+all imported modules, checks host/origin restrictions, creates and edits through
+HTTP and the CLI, checks reciprocal links and stale-save rejection, and verifies
+SIGTERM shutdown. The archive still contains only `wrk`; all UI assets are embedded.
+Cross-compilation/metadata
 inspection does not prove runtime correctness on another platform.
 When verifying downloaded published artifacts with this script, check out their
 release tag first: the provenance check compares each binary's commit to HEAD.
@@ -69,13 +75,28 @@ re-execution and no-op, invalid project formats, truncated downloads, integrity 
 concurrent processes, interruption, and accurate post-publication error reporting.
 Production binaries contain no fixture transport or alternate release endpoint.
 
+The `browser` job runs the Node model tests and Chromium workflow suite on macOS
+and Linux, retaining screenshots and failure traces. To run the same suite against
+an extracted native archive locally, use
+`WRK_BROWSER_BINARY=/absolute/path/to/extracted/wrk npm run test:browser` after
+installing the locked development dependencies and Playwright Chromium.
+See [workspace verification evidence](workspace-verification.md) for current
+platform coverage and the distinction between real and injected failure checks.
+
 For a local Linux check on a Mac with Docker, copy the source into the container's
 local filesystem (do not treat a host bind mount as Linux filesystem evidence):
 
 ```sh
-docker run --rm -v "$PWD:/source:ro" golang:1.25.4-bookworm \
+docker run --rm --init -v "$PWD:/source:ro" golang:1.25.4-bookworm \
   bash -c 'cp -a /source /tmp/wrk && cd /tmp/wrk && go test -count=1 ./... && go test -race -count=1 ./... && go vet ./... && go run ./cmd/wrk validate'
 ```
+
+Use `--init` when testing subprocess interruption: a container whose PID 1 does
+not reap orphaned children can leave dead grandchildren as zombies, making the
+subprocess liveness checks misleading. For an already-running container, execute
+the suite under `tini -s --` (a child subreaper). Run permission checks as an
+unprivileged user; root bypasses the unwritable-directory test. Browser timing
+assertions should run after concurrent builds finish, on the local filesystem.
 
 ## Publish a stable release
 

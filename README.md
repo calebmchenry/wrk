@@ -144,6 +144,9 @@ wrk update <id> --priority normal --add-label reviewed --remove-label needs-tria
 wrk update <id> --parent <parent-id>
 wrk update <id> --no-parent --add-dependency <prerequisite-id>
 wrk update <id> --remove-dependency <prerequisite-id>
+wrk new "Related context" --related <id>
+wrk update <id> --add-related <other-id> --remove-related <old-id>
+wrk update <id> --no-related
 wrk new "Estimate work" --depends-on <prerequisite-id> --field 'estimate=3.5'
 wrk update <id> --field 'customer="123"' --field 'needs_review=true'
 wrk update <id> --remove-field estimate
@@ -161,6 +164,14 @@ Parent set/clear flags conflict. Dependency add/remove flags are repeatable and
 idempotent, but adding and removing the same ID conflicts. Creation accepts
 repeated `--depends-on` and rejects duplicate edges. Relationships must reference
 existing tickets and cannot form cycles within either graph.
+
+Related links provide context, display at both endpoints, and allow cycles without
+changing readiness. Add/remove works from either endpoint; `--no-related` clears
+all incoming and outgoing links. Reverse adds and repeated removals are no-ops.
+Reverse removals can update several files and report each publication state;
+inspect partial failures before retrying. Upgrade all clients before first use of
+the optional version-1 `related` field; older clients reject it. See
+[related-link semantics](docs/cli.md#related-item-updates).
 
 Repeated `--field 'name=YAML'` sets typed custom values on creation or update;
 `--remove-field name` removes them. Shell quotes preserve the argument, while
@@ -212,20 +223,32 @@ session. Stop when the batch is complete or nothing can proceed, and report
 unfinished work and blockers. An empty ready list alone does **not** mean complete:
 inspect in-progress/blocked work, unmet dependencies, and the root separately.
 Keep handoffs in ticket bodies. Follow the [full agent burn loop](docs/burns.md)
-for safe resumption and stop rules. These are CLI primitives and a workflow;
-there is no built-in AI runner or scheduler.
+for safe resumption and stop rules. The generic
+[`wrk run` command](docs/cli.md#scoped-command-execution) can execute a supplied
+action over a query, with an optional persisted-status check and explicit one-ticket
+retries. Runs save full child output and lifecycle records under `.wrk-runs/`
+(add `/.wrk-runs/` to your project's `.gitignore`). Use `--log-dir` to choose a
+location, `--verbose` for live child output on stderr, and `--json` for lifecycle
+NDJSON. See [run output and logs](docs/cli.md#run-output-and-logs) for heartbeat,
+waiting, and failure details. There is no built-in AI provider or scheduler.
 
-For a simple standalone Codex loop, run this from the checkout root:
+For a Codex burn, run this from the checkout root:
 
 ```sh
-python3 scripts/ticket-burn.py \
-  --list-command 'go run ./cmd/wrk list --ready --label web --json'
+go run ./cmd/wrk run --ready --label web --expect-status done -- \
+  codex exec --dangerously-bypass-approvals-and-sandbox 'Implement {id}'
 ```
 
-It starts a fresh `codex exec` with full local access and no approval prompts,
-sends `Implement <ticket-id>`, checks that the ticket is done, and queries again.
-Progress and complete child logs go to `.wrk-burn/`.
-Add `--max-tickets 1` for a trial run. See [runner usage and stopping behavior](docs/burns.md#minimal-codex-runner).
+It starts one fresh full-access Codex call per ticket with exactly `Implement <id>`,
+verifies persisted done status, and selects again. Add `--max-tickets 1` for a trial,
+`--under <parent-id>` or more labels to narrow the scope, and explicit `--stream`
+to wait for previously unprocessed eligible work. Ordinary runs drain and exit.
+Successful IDs are skipped for the invocation; a fresh run may revisit them.
+After inspecting a failure, use `--ticket <id>` to restart the whole action even
+if the ticket is in-progress. There are no automatic retries or worker claims.
+The optional `python3 scripts/ticket-burn.py --ready --label web` is a thin wrapper
+around the same command. See [burn usage, migration, and recovery](docs/burns.md#minimal-codex-runner)
+for retired flags, path/environment behavior, and multi-step scripts.
 
 Recursive labeling publishes one file at a time under one writer lock. On a
 partial failure, output identifies committed, unchanged, and pending tickets.
@@ -264,15 +287,24 @@ The server prints the selected absolute project path and usable local URL.
 It serves one existing project and embeds all browser assets in the executable.
 Browse a searchable list and item detail pane with Markdown descriptions,
 statuses, priority, labels, hierarchy, dependencies, and custom values. Search
-matches title, ID, and body. Active, All, Ready, and manually Blocked views
-intersect with exact label filters and a parent focus. Selection and filters
+uses case-insensitive ordered characters from titles only. Active, All, Ready,
+and manually Blocked views intersect with exact Tag filters and descendant-only
+Under scope. Collapsible parent/child rows retain matching ancestors as muted
+context; explicit filtering reveals matching paths without losing collapse choices. Selection and filters
 survive links and browser navigation. CLI/agent changes appear automatically
 through polling, normally within two seconds. Connection and validation failures
 mark retained data as stale and recover automatically. **Reload project** forces
-an immediate refresh. Browser editing remains subsequent work.
+an immediate refresh. **New** opens a title-only creation modal with optional
+description, tags and parent. A row's **Add child** action supports repeated
+title-only entry. Edit titles and descriptions in the detail pane with explicit
+Save/Cancel; status, tags, parent, dependencies and related links save immediately.
+Browser **Tags** are CLI labels, with no storage rename. Drafts survive live updates;
+stale saves require explicit review, and priority/custom fields remain preserved.
+See [editing and save recovery](docs/browser.md#creating-and-editing).
 
-Parent focus includes the selected root and all descendants before other
-filters apply; CLI `list --under` excludes the root. Markdown images appear as
+Under excludes its root, matching CLI `list --under`; the root can appear as
+context without counting as a match. Existing `focus` links adopt Under semantics
+while retaining selection. Markdown images appear as
 text placeholders, raw HTML is disabled, and arbitrary local files are not
 served. See [browser behavior and verification](docs/browser.md).
 
@@ -281,6 +313,15 @@ CLI/agent edits can continue while it runs. Port conflicts fail without switchin
 stops the server. `serve --json` emits newline-delimited startup/warning/shutdown
 events. See the [server and API contract](docs/cli.md#local-server) for limits,
 same-origin protections, output details, and recovery.
+
+Keep `serve` running in the foreground while a separate terminal or agent uses
+the CLI. It is a local workspace: it does not start agents, run a background
+service, synchronize Git, or commit changes. Direct body/config edits and Git
+operations must happen between both CLI and browser saves. For a reproducible
+two-terminal walkthrough, see [browser and agent workflow](docs/browser.md#browser-and-agent-walkthrough).
+See the [compact workflow acceptance record](docs/compact-workspace-verification.md)
+for current browser/CLI evidence and the [original workspace verification record](docs/workspace-verification.md)
+for packaged runtime checks and their limits.
 
 ## Developing wrk with wrk
 
@@ -321,3 +362,9 @@ records macOS/Linux verification and clean-source build/install runs.
 For browser changes, also run `npm ci`, `npx playwright install chromium`, and
 `npm run test:browser`. These are development dependencies only; the executable
 embeds the complete UI. See [browser checks](docs/browser.md#verification).
+Run `python3 scripts/verify-workspace.py ./bin/wrk` after building to verify the
+embedded module graph and API/CLI persistence outside the source tree with an
+empty executable PATH. Run browser timing checks after CPU-heavy builds finish.
+After packaging, `python3 scripts/verify-release.py dist` also starts the extracted
+native executable away from the checkout, checks every embedded UI module, and
+exercises API/CLI writes with no tools on the executable's PATH.

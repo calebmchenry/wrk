@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 	"wrk/internal/project"
+	"wrk/internal/runner"
 	"wrk/internal/ticket"
 	"wrk/internal/web"
 )
@@ -18,39 +20,55 @@ type Request struct {
 	Title, Status, BodyFile, Parent, Priority, Under   *string
 	Labels, AddLabels, RemoveLabels                    []string
 	NoParent                                           bool
+	NoRelated                                          bool
+	Related, AddRelated, RemoveRelated                 []string
 	Dependencies, AddDependencies, RemoveDependencies  []string
 	Fields                                             []ticket.FieldValue
 	RemoveFields                                       []string
 	Port                                               int
 	Open                                               bool
+	ChildCommand                                       []string
+	RunTicket, ExpectStatus                            *string
+	MaxTickets                                         int
+	Stream                                             bool
+	PollInterval                                       time.Duration
+	HeartbeatInterval                                  time.Duration
+	LogDir                                             string
+	Verbose                                            bool
 }
 
 var commandFlags = map[string]map[string]bool{
 	"version": {}, "upgrade": {"check": false},
 	"serve": {"port": true, "open": false},
-	"init":  {}, "new": {"body-file": true, "parent": true, "priority": true, "label": true, "no-labels": false, "depends-on": true, "field": true},
+	"init":  {}, "new": {"body-file": true, "parent": true, "priority": true, "label": true, "no-labels": false, "depends-on": true, "related": true, "field": true},
 	"list": {"all": false, "ready": false, "label": true, "under": true}, "show": {},
+	"run": {"all": false, "ready": false, "label": true, "under": true, "ticket": true, "expect-status": true, "max-tickets": true, "stream": false, "poll-interval": true, "heartbeat-interval": true, "log-dir": true, "verbose": false},
 	"update": {"title": true, "status": true, "body-file": true, "priority": true, "label": true, "no-labels": false, "add-label": true, "remove-label": true, "recursive": false,
-		"parent": true, "no-parent": false, "add-dependency": true, "remove-dependency": true, "field": true, "remove-field": true},
+		"parent": true, "no-parent": false, "add-related": true, "remove-related": true, "no-related": false, "add-dependency": true, "remove-dependency": true, "field": true, "remove-field": true},
 	"validate": {}, "help": {},
 }
 
 var repeatableFlags = map[string]bool{
 	"label": true, "add-label": true, "remove-label": true, "depends-on": true,
+	"related": true, "add-related": true, "remove-related": true,
 	"add-dependency": true, "remove-dependency": true, "field": true, "remove-field": true,
 }
 
 var projectCommands = map[string]bool{
-	"new": true, "list": true, "show": true, "update": true, "validate": true, "serve": true,
+	"new": true, "list": true, "show": true, "update": true, "validate": true, "serve": true, "run": true,
 }
 
 func Parse(args []string) (Request, error) {
-	r := Request{Labels: []string{}, Port: web.DefaultPort}
+	r := Request{Labels: []string{}, Port: web.DefaultPort, PollInterval: runner.DefaultPollInterval, HeartbeatInterval: runner.DefaultHeartbeatInterval}
 	seen := map[string]bool{}
 	options := true
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if options && a == "--" {
+			if r.Command == "run" {
+				r.ChildCommand = append([]string{}, args[i+1:]...)
+				break
+			}
 			options = false
 			continue
 		}
@@ -88,6 +106,37 @@ func Parse(args []string) (Request, error) {
 				return r, fmt.Errorf("--%s does not take a value", name)
 			}
 			switch name {
+			case "verbose":
+				r.Verbose = true
+			case "log-dir":
+				if strings.TrimSpace(value) == "" {
+					return r, fmt.Errorf("--log-dir requires a nonempty path")
+				}
+				r.LogDir = value
+			case "heartbeat-interval":
+				d, err := time.ParseDuration(value)
+				if err != nil || d <= 0 {
+					return r, fmt.Errorf("--heartbeat-interval requires a positive duration (for example 60s)")
+				}
+				r.HeartbeatInterval = d
+			case "stream":
+				r.Stream = true
+			case "poll-interval":
+				d, err := time.ParseDuration(value)
+				if err != nil || d <= 0 {
+					return r, fmt.Errorf("--poll-interval requires a positive duration (for example 5s)")
+				}
+				r.PollInterval = d
+			case "ticket":
+				r.RunTicket = &value
+			case "expect-status":
+				r.ExpectStatus = &value
+			case "max-tickets":
+				n, err := strconv.Atoi(value)
+				if err != nil || n <= 0 {
+					return r, fmt.Errorf("--max-tickets requires a positive integer")
+				}
+				r.MaxTickets = n
 			case "port":
 				port, err := strconv.ParseUint(value, 10, 16)
 				if err != nil {
@@ -132,6 +181,14 @@ func Parse(args []string) (Request, error) {
 				r.Parent = &value
 			case "no-parent":
 				r.NoParent = true
+			case "related":
+				r.Related = append(r.Related, value)
+			case "add-related":
+				r.AddRelated = append(r.AddRelated, value)
+			case "remove-related":
+				r.RemoveRelated = append(r.RemoveRelated, value)
+			case "no-related":
+				r.NoRelated = true
 			case "depends-on":
 				r.Dependencies = append(r.Dependencies, value)
 			case "add-dependency":
@@ -211,7 +268,26 @@ func Parse(args []string) (Request, error) {
 			return r, err
 		}
 	}
-	if r.Command == "list" {
+	if r.Command == "run" {
+		if seen["poll-interval"] && !r.Stream {
+			return r, fmt.Errorf("--poll-interval requires --stream")
+		}
+		if len(r.ChildCommand) == 0 || strings.TrimSpace(r.ChildCommand[0]) == "" {
+			return r, fmt.Errorf("run requires a nonempty command after --")
+		}
+		if r.ExpectStatus != nil && !ticket.Statuses[*r.ExpectStatus] {
+			return r, fmt.Errorf("--expect-status requires todo, in-progress, blocked, done, or canceled")
+		}
+		if r.RunTicket != nil {
+			if !ticket.IDPattern.MatchString(*r.RunTicket) {
+				return r, fmt.Errorf("--ticket requires a ticket ID")
+			}
+			if r.All || r.Ready || len(r.Labels) > 0 || r.Under != nil || r.Stream {
+				return r, fmt.Errorf("--ticket conflicts with --all, --ready, --label, --under, and --stream")
+			}
+		}
+	}
+	if r.Command == "list" || r.Command == "run" {
 		for _, label := range r.Labels {
 			if label == "" || !utf8.ValidString(label) {
 				return r, fmt.Errorf("--label requires a nonempty UTF-8 string")
@@ -231,6 +307,7 @@ func (r Request) changes(body []byte) ticket.Changes {
 		Parent: r.Parent, NoParent: r.NoParent,
 		AddDependencies: r.AddDependencies, RemoveDependencies: r.RemoveDependencies,
 		Fields: r.Fields, RemoveFields: r.RemoveFields,
+		AddRelated: r.AddRelated, RemoveRelated: r.RemoveRelated, NoRelated: r.NoRelated,
 	}
 	if r.BodyFile != nil {
 		text := string(body)

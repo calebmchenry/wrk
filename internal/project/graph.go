@@ -3,6 +3,7 @@ package project
 import (
 	"slices"
 	"sort"
+	"strings"
 	"wrk/internal/diagnostic"
 	"wrk/internal/ticket"
 )
@@ -12,16 +13,18 @@ type Blocker struct {
 	Status string `json:"status"`
 }
 type Summary struct {
-	ID        string    `json:"id"`
-	Path      string    `json:"path"`
-	Revision  string    `json:"revision"`
-	Title     string    `json:"title"`
-	Status    string    `json:"status"`
-	Parent    *string   `json:"parent"`
-	DependsOn []string  `json:"depends_on"`
-	Priority  string    `json:"priority"`
-	Labels    []string  `json:"labels"`
-	Blockers  []Blocker `json:"blockers"`
+	ID              string    `json:"id"`
+	Path            string    `json:"path"`
+	Revision        string    `json:"revision"`
+	Title           string    `json:"title"`
+	Status          string    `json:"status"`
+	Parent          *string   `json:"parent"`
+	DependsOn       []string  `json:"depends_on"`
+	Related         []string  `json:"related"`
+	RelatedRevision string    `json:"related_revision"`
+	Priority        string    `json:"priority"`
+	Labels          []string  `json:"labels"`
+	Blockers        []Blocker `json:"blockers"`
 }
 
 func (s *Snapshot) Summary(t *ticket.Ticket) Summary {
@@ -29,8 +32,47 @@ func (s *Snapshot) Summary(t *ticket.Ticket) Summary {
 	sort.Strings(deps)
 	labels := append([]string{}, t.Labels...)
 	sort.Strings(labels)
-	return Summary{t.ID, t.Path, ticket.Revision(t.Source), t.Title, t.Status, t.Parent, deps, t.Priority, labels, s.Blockers(t)}
+	return Summary{
+		ID: t.ID, Path: t.Path, Revision: ticket.Revision(t.Source), Title: t.Title,
+		Status: t.Status, Parent: t.Parent, DependsOn: deps, Related: s.RelatedIDs(t.ID),
+		RelatedRevision: s.RelatedRevision(t.ID), Priority: t.Priority, Labels: labels, Blockers: s.Blockers(t),
+	}
 }
+
+// InvalidateRelationships must follow changes to ByID in a mutable write snapshot.
+func (s *Snapshot) InvalidateRelationships() { s.related = nil }
+
+// RelatedIDs derives the symmetric view without storing reciprocal copies.
+func (s *Snapshot) RelatedIDs(id string) []string {
+	if s.related == nil {
+		sets := map[string]map[string]bool{}
+		add := func(a, b string) {
+			if sets[a] == nil {
+				sets[a] = map[string]bool{}
+			}
+			sets[a][b] = true
+		}
+		for _, t := range s.ByID {
+			for _, other := range t.Related {
+				add(t.ID, other)
+				add(other, t.ID)
+			}
+		}
+		s.related = map[string][]string{}
+		for id, values := range sets {
+			for value := range values {
+				s.related[id] = append(s.related[id], value)
+			}
+			sort.Strings(s.related[id])
+		}
+	}
+	return append([]string{}, s.related[id]...)
+}
+
+func (s *Snapshot) RelatedRevision(id string) string {
+	return ticket.Revision([]byte(id + "\n" + strings.Join(s.RelatedIDs(id), "\n")))
+}
+
 func (s *Snapshot) Blockers(t *ticket.Ticket) []Blocker {
 	out := []Blocker{}
 	for _, id := range t.DependsOn {
@@ -119,8 +161,9 @@ func ValidateGraphs(s *Snapshot) []diagnostic.Diagnostic {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	for _, field := range []string{"parent", "depends_on"} {
+	for _, field := range []string{"parent", "depends_on", "related"} {
 		edges := map[string][]string{}
+		relatedPairs := map[[2]string]bool{}
 		for _, id := range ids {
 			t := s.ByID[id]
 			refs := []string{}
@@ -128,6 +171,8 @@ func ValidateGraphs(s *Snapshot) []diagnostic.Diagnostic {
 				if t.Parent != nil {
 					refs = append(refs, *t.Parent)
 				}
+			} else if field == "related" {
+				refs = append(refs, t.Related...)
 			} else {
 				refs = append(refs, t.DependsOn...)
 			}
@@ -141,6 +186,21 @@ func ValidateGraphs(s *Snapshot) []diagnostic.Diagnostic {
 				} else if s.ByID[ref] == nil {
 					code, message = "MISSING_REFERENCE", "referenced ticket does not exist"
 				}
+				if field == "related" {
+					if seen[ref] {
+						code, message = "DUPLICATE_RELATED", "related item is listed more than once"
+					}
+					if code == "" {
+						pair := [2]string{id, ref}
+						if id > ref {
+							pair = [2]string{ref, id}
+						}
+						if relatedPairs[pair] {
+							code, message = "DUPLICATE_RELATED", "related pair must be stored on only one endpoint"
+						}
+						relatedPairs[pair] = true
+					}
+				}
 				seen[ref] = true
 				if code != "" {
 					ds = append(ds, diagnostic.Diagnostic{Code: code, Message: message, Path: t.Path, Field: field, IDs: []string{id, ref}})
@@ -149,6 +209,9 @@ func ValidateGraphs(s *Snapshot) []diagnostic.Diagnostic {
 				}
 			}
 			sort.Strings(edges[id])
+		}
+		if field == "related" {
+			continue // Contextual links may form cycles.
 		}
 		color := map[string]int{}
 		stack := []string{}

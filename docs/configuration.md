@@ -21,7 +21,7 @@ fields: {}
 | `defaults.labels` | Optional labels applied at creation; defaults to an empty list. |
 | `fields` | Optional definitions for custom ticket fields; defaults to an empty map. |
 
-New tickets default to `todo`. Explicit creation arguments override configured defaults, including an explicitly empty label list. Defaults apply only to new tickets: changing configuration never rewrites or changes the meaning of existing ticket values. IDs, parents, and dependencies do not have configurable defaults.
+New tickets default to `todo`. Explicit creation arguments override configured defaults, including an explicitly empty label list. Defaults apply only to new tickets: changing configuration never rewrites or changes the meaning of existing ticket values. IDs, parents, dependencies, and related links do not have configurable defaults.
 
 Updates use existing ticket values, never creation defaults. An omitted priority
 always means `normal` and omitted labels always mean an empty list. Thus
@@ -29,6 +29,10 @@ always means `normal` and omitted labels always mean an empty list. Thus
 omitted values. `update --label` replaces an existing list rather than combining
 it with configured defaults; use `--add-label` / `--remove-label` for incremental
 edits. See [priority and replacement updates](cli.md#priority-and-replacement-updates).
+
+The optional ticket `related` field uses version 1 without changing this config.
+Existing files remain valid; upgrade all clients before first use because older
+strict clients reject the new key. See [related-item compatibility](ticket-format.md#related-items).
 
 ## Custom fields
 
@@ -66,6 +70,7 @@ updates](cli.md#custom-field-input-and-updates) for quoting, aliases, and no-ops
 - Selection uses absolute, lexically cleaned paths without expanding directory symlinks in the reported root. Root/ancestor directory aliases are allowed; `.wrk` must be a real directory, and config/ticket/lock files must be regular files, not symlinks. Arbitrary config locations and separate data layouts are unsupported.
 - Read project configuration for each command. Reject malformed configuration, duplicate keys, unknown settings, invalid defaults or field definitions, and unsupported versions with an actionable error before writing anything.
 - `serve` fixes the selected root for the process lifetime, then rereads configuration for every API read. Its [project endpoint](cli.md#read-api) exposes validated defaults and field definitions. Runtime invalid configuration produces diagnostics, never a partially healthy response.
+- Browser creation reads defaults again under the writer lock at save time. Config changes do not rewrite existing items or discard open drafts. Repair invalid config between CLI/browser saves; the next poll restores the live view. Server ports and browser launch are command flags, not config keys.
 - Initialization requires an existing target directory, exclusively creates `.wrk/`, and publishes the exact initial configuration above. It refuses any existing `.wrk` entry, including incomplete or symlinked entries; it never adopts existing data. Add `**/.wrk/.lock` and `**/.wrk/.wrk-stage-*` to that project's Git ignore rules.
 - Validate existing ticket IDs independently of the current prefix, and check uniqueness across the whole project.
 - Provide `wrk validate` to check configuration, tickets, and relationships without mutating files.

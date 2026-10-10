@@ -21,7 +21,12 @@
 | `wrk list --ready` | `todo` with all dependencies `done`. |
 | `wrk list --label burn --label backend` | Require every supplied label (AND); exact, case-sensitive matching. |
 | `wrk list --under id` | Descendants at every depth, excluding the root. Intersects label and status/readiness filters. |
-| `wrk show id` | Full source plus derived children and unfinished dependency blockers. |
+| `wrk run [filters] -- command [arguments...]` | Sequential actions over a fresh list query; stop on failure or after all matching IDs have succeeded once. |
+| `wrk run --ticket id -- command [arguments...]` | One explicit action, independent of readiness; manual retry from the beginning. |
+| `wrk show id` | Full source plus derived children, unfinished dependency blockers, and reciprocal related IDs. |
+| `wrk new "Title" --related id` | Repeatable contextual links, stored on the new item. |
+| `wrk update id --add-related other --remove-related old` | Repeatable contextual edits from either endpoint. |
+| `wrk update id --no-related` | Clear all incoming and outgoing contextual links. |
 | `wrk update id --title "Title" --status in-progress` | Either or both flags, one validated mutation. No-op reports `changed: false`, without rewriting. |
 | `wrk update id --body-file path` | Replace the exact UTF-8 body; `-` reads stdin through EOF before locking. Empty input clears it. |
 | `wrk update id --add-label burn --remove-label triage` | Repeatable, idempotent label edits; may combine with title/status/priority. |
@@ -42,7 +47,7 @@ also precede the command. Support
 
 ## Project selection
 
-`new`, `list`, `show`, `update`, `validate`, and `serve` accept either `--project directory`
+`new`, `list`, `show`, `update`, `validate`, `serve`, and `run` accept either `--project directory`
 or `--config directory/.wrk/config.yaml`, before or after the command:
 
 ```sh
@@ -93,8 +98,12 @@ wrk serve --config '/path/to/my project/.wrk/config.yaml' --json
 `serve` resolves an existing project once, validates it before listening, and
 keeps that absolute root for its lifetime. The ordinary selection/discovery and
 symlink rules apply. A new nearer `.wrk` directory cannot change the selection.
-No initialization, database, cache, writer lock, or per-request subprocess is used.
+No initialization, database, cache, or per-request subprocess is used. Startup
+and reads take no writer lock; mutations hold it only for the shared store operation.
 CLI and agent writes remain available while the server runs.
+The process stays in the foreground; it installs no daemon and starts no agent
+runner, Git synchronization, or automatic commits. Agent commands are supplied
+separately to `wrk run`, with explicit `--stream` when continuous waiting is wanted.
 
 Bind only IPv4 `127.0.0.1`. Port defaults to 7331; `--port` accepts decimal integers
 0 through 65535. Zero requests an OS-assigned port; every other value is used
@@ -104,11 +113,17 @@ project root are printed after a successful listen.
 
 The executable embeds the HTML, CSS, and JavaScript; it needs no CDN, Node,
 frontend server, external fonts, or separate asset installation. The workspace
-provides body/title/ID search, intersecting views/labels/parent focus, and item
+provides fuzzy title search, intersecting views/tags/descendant-only Under scope,
+collapsible hierarchy with ancestor context, and item
 details with safe Markdown and relationship navigation. Automatic polling picks
 up external changes and displays validation/reconnection state; retained data
-is explicitly marked stale during failures. Browser editing remains a separate
-ticket. See [browser behavior](browser.md#live-updates-and-recovery).
+is explicitly marked stale during failures. The title-only New modal, repeated
+inline Add child entry, and direct detail editor use revision-checked shared store
+mutations. Text edits use Save/Cancel; status, tags, parent and relationships save
+immediately. Browser Tags map to `labels` and CLI `--label`; Under excludes its
+root like `list --under`. Context ancestor rows are a browser presentation and do
+not count as matches or change CLI/API list results. Fuzzy title search is applied
+in the browser to the workspace snapshot. See [browser editing](browser.md#creating-and-editing).
 
 `--open` runs `open <url>` on macOS or `xdg-open <url>` on Linux, after listening,
 without a shell. It is opt-in and has a three-second timeout. A launch failure
@@ -153,19 +168,20 @@ and local clients without Origin/Fetch Metadata are supported for reads.
 No CORS permissions are returned. Security rejections omit the project root.
 Loopback is a local-user trust boundary, not authentication against local software.
 
-All routes accept GET/HEAD only. Read requests must have no body. The common guard
-already requires an exact same-origin `Origin` and `Content-Type: application/json`
-for unsafe methods; passing it currently returns 405. Future mutation endpoints
-must retain this guard and body limit, validate JSON, and call shared store services
-with the expected item revision. No cross-origin or missing-Origin write exception
-is allowed. OPTIONS/preflight is not enabled.
+Reads accept GET/HEAD and must have no body. Writes accept POST `/api/items` and
+PATCH `/api/items/<id>`. Unsafe methods require an exact same-origin `Origin` and
+`Content-Type: application/json` (optional `charset=utf-8` only), in addition to the
+host/Fetch Metadata guard. Cross-origin, missing/null Origin, HTML forms, and
+unsupported content types receive 403 with no mutation. GET/HEAD never write.
+OPTIONS/preflight is not enabled; no CORS exceptions or Referer fallback exist.
+Other methods return 405. All mutations use the fixed project selected at startup.
 
 | Route | Successful `result` |
 | --- | --- |
 | `/api/project` | `ticket_count`, `config` (`version`, `prefix`, `defaults.priority`, `defaults.labels`, `fields` definitions), ordered `statuses` and `priorities`. Each field definition has `type`, `description`, `options`. |
 | `/api/workspace` | `project` (the `/api/project` result), all `tickets` (summaries plus exact UTF-8 `body`), `selected` (requested ID or empty string), and `detail` (the item endpoint result or null), from one validated load. Optional `selected=<id>` includes that detail; a missing selected item returns null without failing the workspace. |
-| `/api/items` | `tickets`, using the CLI summary contract including source revision, parent, dependencies, labels, effective priority, and derived blockers. Defaults to active items. |
-| `/api/items/<id>` | `ticket` summary, exact UTF-8 `body` and full `source`, original `metadata` (source before body, including delimiters), safe `body_html`, nullable `parent` summary, and `children`, `dependencies`, and reverse `dependents` summary arrays. |
+| `/api/items` | `tickets`, using the CLI summary contract including source and related revisions, parent, dependencies, reciprocal related IDs, labels, effective priority, and derived blockers. Defaults to active items. |
+| `/api/items/<id>` | `ticket` summary, exact UTF-8 `body` and full `source`, original `metadata` (source before body, including delimiters), safe `body_html`, nullable `parent` summary, `children`, `dependencies`, reverse `dependents`, and reciprocal `related` summary arrays. |
 
 List parameters are `all=true|false`, `ready=true|false`, repeatable nonempty
 `label`, and scalar `under=<id>`. They use the CLI's intersections, readiness,
@@ -189,7 +205,7 @@ browser retains only its current snapshot/validator in memory, fetches again
 There is no server snapshot cache or filesystem-event backlog.
 
 HTTP JSON uses `{schema_version: 1, ok, project_root, result, errors}`. Successful
-errors arrays are empty; failed results are null with actionable shared diagnostics
+errors arrays are empty; failed read results are null with actionable shared diagnostics
 (code/message and path/field/line/IDs when available). Each read freshly loads and
 validates the whole project. Any invalid file/config/reference makes the read fail
 with 503, even when the requested item is valid. No partial success or stale healthy
@@ -200,7 +216,7 @@ boundary as CLI reads; multiple requests are not a transaction. Item revisions
 cover exact source bytes as described in [storage](storage.md#item-revisions-and-stale-edits).
 Arbitrary custom YAML values remain in `source`, without lossy JSON coercion.
 
-Only `/`, `/app.js`, `/model.mjs`, `/live.mjs`, and `/style.css` serve assets, from the embedded filesystem.
+Only `/`, `/app.js`, `/model.mjs`, `/live.mjs`, `/editor.mjs`, and `/style.css` serve assets, from the embedded filesystem.
 No directory listing, project-file serving, clean-path redirects, or SPA fallback
 is provided. Assets and APIs use `Cache-Control: no-store`, `nosniff`, no-referrer,
 frame denial, and a self-only Content Security Policy without inline script access.
@@ -209,18 +225,67 @@ Markdown enters the HTML sink: Goldmark with raw HTML disabled, restricted links
 and images replaced by text. CSP disables image loads entirely. See the
 [Markdown policy](browser.md#markdown-and-custom-values).
 
+### Browser mutations
+
+POST `/api/items` accepts `title` (required string), optional `body` (string),
+`labels` (string array), `parent` (ID string or empty for none), `depends_on`, and `related`
+(ID arrays). Omitted labels use current configuration defaults; `[]` explicitly
+clears them. Creation uses todo status and current priority defaults.
+
+PATCH `/api/items/<id>` requires `expected_revision`, the opaque item token
+originally loaded by the caller. Editable fields are `title`, `body`, `status`,
+`labels` (replacement array), `parent` (empty string clears), `add_dependencies`,
+`remove_dependencies`, `add_related`, and `remove_related` (ID arrays), plus
+`no_related` (boolean; true clears all incident links). Related changes require
+`expected_related_revision` from the same read as the draft, even for an empty
+add/remove array or `no_related: false`. The token can also accompany ordinary
+edits; the browser includes it for every edit. False alone is not a change.
+The source token alone cannot detect incoming link changes. Omitted fields are preserved. At least one
+editable field is required; a same-value field checks the revision even for a no-op.
+Priority/custom fields, IDs, recursion, and filesystem selectors are not writable
+through this API. References and cycles use current selected-project validation
+under the shared writer lock. Revisions are checked under that lock before
+candidate/no-op handling, using the [shared store contract](storage.md#item-revisions-and-stale-edits).
+
+Requests must be one UTF-8 JSON object without duplicate/unknown keys, trailing
+JSON, nulls, or type coercion. No query parameters are accepted. Title and label
+entries are limited to 4096 UTF-8 bytes; lists to 1024 entries; revisions to 128
+bytes. The entire encoded request (including description) must fit within 1 MiB.
+These are service bounds, not CLI or file-format limits.
+
+Successful POST returns 201; PATCH returns 200. The common envelope's `result`
+contains `ticket` (published/unchanged summary and revision), `created`, `changed`,
+and `publication` (`committed` or `unchanged`). Link updates also include `updates`,
+with each affected file's `{ticket, changed, publication}`; the addressed item can
+be unchanged while an owner was committed. Partial failures retain this list with
+pending entries. Inspect every entry before retrying. Invalid request fields return 400;
+shared validation/cycle failures return 422; stale revisions return 409 `CONFLICT`;
+missing items return 404 `NOT_FOUND`; writer contention returns 503 `BUSY` with
+`Retry-After: 1`; resource limits return 413; storage failures return 500.
+
+Pre-publication failures have null result. **Committed errors are the exception**:
+500 with `ok: false`, diagnostics, and non-null result identifying the affected item,
+published revision, and `publication: "committed"`. Directory-sync failures can
+leave durability uncertain. A lost response is also ambiguous. Inspect/resynchronize
+before explicitly retrying; never roll back or automatically retry either case.
+A stale browser draft remains intact for explicit reload/review.
+
 ### Resource limits and recovery
 
 The HTTP server sets a 16 KiB header limit, five-second header timeout,
 15-second request-read timeout, 20-second response-write timeout, and 30-second
 idle timeout. URLs are limited to 4096 bytes (414); bodies over 1 MiB receive 413.
 At most four project reads run concurrently; excess reads receive 503 `BUSY`
-with `Retry-After: 1`.
+with `Retry-After: 1`. One HTTP mutation runs at a time; another receives 503
+`BUSY`. The project writer lock also excludes concurrent CLI writers.
 
 Startup and each project read have a 15-second context deadline, at most 2 MiB per
 config/ticket file, 32 MiB total input, and 20,000 direct `.wrk` directory entries
 (including ignored entries). Hitting a project read limit produces `RESOURCE_LIMIT`
 and no healthy partial result. Use the CLI for larger projects or reduce input sizes.
+HTTP mutations apply the same deadline/limits to the locked load and creation
+collision reloads. Candidate file/total bytes are bounded, and the final snapshot
+comparison bounds reads to original sizes and checks cancellation/inventory limits.
 These are server resource limits, not changes to the file format or ordinary CLI.
 Cancellation is checked during reads, inventory scanning, and between validation
 phases; individual YAML parsing/graph operations and filesystem syscalls are not
@@ -307,6 +372,195 @@ are `low`, `normal`, `high`, `urgent`; statuses are `todo`, `in-progress`, `bloc
 Explicit changes on blocked tickets and reopening are allowed. Nothing cascades.
 Relationship and custom-field edits can combine with other single-ticket metadata changes.
 
+## Scoped command execution
+
+```sh
+wrk run --ready --label backend --expect-status done --max-tickets 3 -- ./implement-ticket '{id}'
+wrk run --all --under <parent-id> -- ./review-ticket --id '{id}'
+wrk run --stream --poll-interval 5s --ready --label backend --expect-status done -- ./implement-ticket '{id}'
+wrk --project ../other-project run --ticket <failed-id> --expect-status done -- ./implement-ticket '{id}'
+```
+
+`run` requires a nonempty child command after `--`. All tokens after that delimiter
+belong to the child, including `--json`, `--help`, and further `--` tokens. Existing
+commands keep their ordinary delimiter behavior. Every literal `{id}` in argument
+values is replaced with the selected ID, preserving spaces, empty arguments, and
+metacharacters. The executable name itself is literal. There is no implicit shell,
+splitting, expansion, pipeline, alias, or redirection; invoke an interpreter explicitly
+when needed. A directly executed script requires executable permission and a valid
+interpreter/shebang; alternatively pass `python3` or `/bin/sh` explicitly, for example
+`wrk run --ready -- python3 'scripts/action with spaces.py' '{id}'`.
+
+Selection reuses `list`: no filters selects active todo/in-progress/blocked tickets;
+`--all` includes all statuses; `--ready` requires todo with done prerequisites.
+`--all` and `--ready` conflict. Repeated `--label` filters use AND; `--under` selects
+descendants and excludes the root. All filters intersect, with IDs in ascending
+order. The project must be valid and the scope root must exist. After each successful
+action, reload the pinned project and choose the first current match that has not
+succeeded earlier in this invocation. Newly added or unblocked tickets can run next.
+Successful IDs stay skipped even if they still match or their status changes later.
+Ordinary mode exits 0 when no unprocessed matches remain; an empty ready query is
+not proof that the project is complete.
+
+`--stream` waits when no unprocessed matches remain, then reloads the same project
+and query. `--poll-interval` accepts a positive Go duration such as `250ms`, `5s`,
+or `1m`, defaults to `5s`, and requires `--stream`. The timer runs only while idle;
+after each successful action, selection runs immediately. The runner never selects
+or queues another action while a child is running. Successful IDs stay skipped
+across every poll and idle period, even after leaving/re-entering the filter or
+being reopened. A raw query containing only successful IDs is idle too. New tickets
+and previously unseen tickets becoming eligible through dependency, status, label,
+or parent changes can run on a later poll. Success limits and all failure stops
+apply unchanged; streaming never retries a failure or ignores invalid project data.
+
+By default an action must exit 0 and leave a valid, existing ticket in the same
+project. `--expect-status todo|in-progress|blocked|done|canceled` also requires that
+ticket's persisted status to equal the supplied built-in value. Becoming in-progress
+or leaving the original query does not satisfy expected done. Missing/deleted tickets,
+invalid project data, nonzero exits, and failed checks stop immediately, before another
+ticket starts. Only fully successful actions enter the processed set and success count.
+`--max-tickets N` is a positive successful-action limit, not an attempt count or count
+of done tickets. Omit it for no limit.
+
+`--ticket <id>` validates the project and ticket, then runs exactly one action without
+checking readiness or resetting status. It conflicts with all query filters and
+`--stream`; `--poll-interval` cannot be used with one-off execution. `list` does not
+accept streaming or polling flags. A new invocation has no remembered processed IDs
+or checkpoints: inspect partial changes,
+resolve the failure, and explicitly retry the action from the beginning. Scripts own
+recovery from their side effects. The runner changes no ticket metadata or Git state.
+Keep a multi-step implementation ticket unfinished until the entire required workflow
+succeeds. A retry restarts every step; the script author must inspect/reuse or repair
+partial results and make repetition safe. Agent calls are not inherently idempotent.
+There are no named steps, workflow checkpoints, automatic retries, or rollback.
+One sequential runner does not claim tickets against independent workers.
+See [Codex burns and migration](burns.md#minimal-codex-runner) for the full-access
+command, required done check, unchanged-status review, and recovery examples.
+
+Resolve `--project`/`--config` against the invocation directory once. Children run
+in the selected project root; relative executable paths (such as `./script`), relative
+PATH entries, and child relative arguments use that root. Bare executables search the
+inherited PATH. Exported environment variables are inherited without loading `.env`
+or sourcing shell startup files, and no environment dump is emitted. Child stdin is
+`/dev/null`; actions must be configured for noninteractive execution. Child wrk
+mutation commands work normally: the runner holds no writer lock.
+Direct body/config edits and Git operations retain the [external-editor boundary](storage.md).
+
+SIGINT/SIGTERM interrupt an idle timer promptly or stop the active process group
+with SIGTERM, escalating to SIGKILL within two seconds for an unresponsive leader;
+remaining group descendants are also
+killed even if the leader exits first. Partial workspace changes remain for inspection.
+Interruption exits 130, action/selection/completion failures exit 1, and usage errors
+exit 2. Drained queries, success limits, and successful explicit actions exit 0.
+
+### Run output and logs
+
+Human mode prints the selected project/child cwd, invocation cwd, effective filters,
+ID ordering, mode/poll interval, action template, success condition, success-count
+limit, heartbeat interval, and run-log path at startup. Lifecycle progress goes to
+stderr; the final summary and explicit retry guidance go to stdout. Selection counts
+are current snapshot counts, not a fixed queue: `matches = processed + unprocessed`.
+Repeated labels require **all** labels, intersected with status and descendants;
+Under includes the parent's title/ID and explicitly excludes that parent.
+
+Start/finish/error lines remain in the transcript. `--heartbeat-interval` accepts a
+positive Go duration (default `60s`), reporting action elapsed time and last observed
+child-output time, or explicitly saying no output was observed. No phases, percent
+complete, ETA, or hang detection are inferred. On a terminal, heartbeats replace one
+running line; redirected progress is append-only text without terminal controls.
+`TERM=dumb` disables line replacement.
+
+Idle explanations appear on entry or when counts/the parent title change, not every
+poll. They distinguish no raw matches from all matches already processed. Status
+counts partition the same label/descendant snapshot into ready todo, todo waiting
+on dependencies, in-progress, manually blocked, done, and canceled. Status/readiness
+filters are removed **only** for these diagnostic counts; execution eligibility is
+unchanged. Leaving idle reports elapsed waiting time. Successful actions can leave
+tickets unchanged; a drained query never claims all scoped work is done.
+
+Each invocation creates a timestamped, uniquely suffixed directory in the selected
+project's `.wrk-runs/`. `--log-dir directory` overrides that base; relative overrides
+resolve from the **invocation directory**, unlike child paths. The directory contains:
+
+- `run.jsonl`: the same versioned lifecycle envelopes used by JSON mode, including
+  project, command template, expanded commands, action/run times, exits, completion
+  checks, output activity, and final reason.
+- `0001-<id>.stdout.log` and `0001-<id>.stderr.log`, then `0002-...`: complete raw
+  bytes from each action, streamed to files without storing a transcript in memory.
+
+New directories use mode 0700 and files 0600, subject to the user's umask. Files are
+written directly without application buffering, then synced/closed at action/run
+completion. They contain command arguments and child output, but no inherited
+environment dump. Add `/.wrk-runs/` to a project's `.gitignore`; this repository does
+so. Ignore custom log locations as appropriate. Logs are diagnostic artifacts,
+not workflow checkpoints or a resume database; each invocation has a fresh processed
+set. Retention/deletion is manual.
+
+Child output is log-only by default. `--verbose` additionally mirrors both raw child
+streams to stderr, in human or JSON mode, and disables terminal line replacement.
+The two streams retain separate full logs; their interleaving on stderr is not an
+ordering guarantee. Raw bytes may contain child-provided terminal controls. JSON
+stdout never contains raw child output or human text.
+
+Process errors (start/nonzero exit/wait) differ from an exit-0 completion-check
+failure. Failures include the observed persisted status when it can be read, ticket
+and log paths, a project-pinned `show` command, and a shell-quoted explicit-ticket
+rerun preserving the original action arguments and success requirement. Reruns begin
+at the start; inspect partial changes first. A handled stop reports the actual reason,
+successful-action count, elapsed time, failed/current ticket when relevant, and logs.
+Logging or output failures stop execution, including the active process group, before
+another ticket can start. A broken stdout/stderr pipe is handled as an output failure.
+If an event destination fails, stderr receives a best-effort diagnostic and exit is 1;
+no terminal event is guaranteed after output failure, SIGKILL, or process loss.
+
+### Run JSON events
+
+`run --json` emits newline-delimited version-1 envelopes, promptly and without an
+application output buffer. Each line is an independent object:
+
+```json
+{"schema_version":1,"command":"run","ok":true,"project_root":"/project","result":{"event":"selection","timestamp":"2026-10-10T12:00:00Z","run_started":"2026-10-10T12:00:00Z","elapsed_ns":1000000,"counts_valid":true,"matches":2,"processed":0,"unprocessed":2,"scope":{"ready":2,"waiting_on_dependencies":0,"in_progress":0,"blocked":0,"done":0,"canceled":0},"query":{"all":false,"ready":true,"labels":[],"under":null,"ticket":null},"command_template":["./review","{id}"],"max_tickets":0,"stream":false,"poll_interval_ns":5000000000,"heartbeat_interval_ns":60000000000,"successful":0,"invocation_cwd":"/project","run_directory":"/project/.wrk-runs/example","run_log":"/project/.wrk-runs/example/run.jsonl","selection":"ready: todo with all dependencies done","ordering":"ID ascending; first unprocessed match"},"errors":[]}
+```
+
+The `result` event contract:
+
+| Field | Meaning |
+| --- | --- |
+| `event` | `started`, `selection`, `idle_started`, `idle_changed`, `idle_finished`, `action_started`, `heartbeat`, `action_finished`, or `finished`. |
+| `timestamp`, `run_started`, `elapsed_ns` | RFC3339 timestamps and elapsed run nanoseconds; all duration fields are integer nanoseconds. |
+| `query`, optional `parent`, `selection`, `ordering` | Actual parsed selection, current parent summary if available, human description, ID ordering rule. |
+| `counts_valid`, `matches`, `processed`, `unprocessed`, `scope` | Counts from the latest valid selection snapshot. `counts_valid` is false at startup/before the first selection; zeros there are not a queried empty scope. Later errors retain the last valid counts. |
+| `command_template`, optional `required_status`, `max_tickets`, `stream`, `poll_interval_ns`, `heartbeat_interval_ns` | Fixed invocation settings; zero max means unlimited. |
+| `successful` | Number of fully successful actions so far, not number of done tickets. |
+| `invocation_cwd`, `run_directory`, `run_log` | Absolute invocation and log paths; the envelope's `project_root` is also the child cwd. |
+| optional `idle` | `started` timestamp and `elapsed_ns` for the current idle period, including when leaving idle. |
+| optional `action` | Attempt's `sequence` (1-based within this run), selected ticket summary, exact expanded `command` array, `started`, optional `ended`, `elapsed_ns`, `exit_code` (null before launch/start failure, -1 if signaled), optional `signal`, `required_status`, `observed_status`, `failure`, `stdout_log`, `stderr_log`, `completion_check`, and `output`. |
+| `action.completion_check` | `not_run`, `passed`, or `failed`; process failure skips completion checking. Passing verifies a valid existing ticket and the optional required status. |
+| `action.output` | `stdout_bytes`, `stderr_bytes` observed from the child and optional `last_output` timestamp. Absent last output means none observed; this is not a progress estimate. |
+| optional `show_command`, `retry_command` | Copyable POSIX-shell diagnostics for failed/current actions; original template arguments and selected project are preserved. |
+| optional `outcome` | Only on `finished`: `successful`, `reason`, `elapsed_ns`, `last_action`, optional `failure`. Reasons: `drained`, `limit`, `ticket`, `interrupted`, `project`, `selection`, `start`, `exit`, `wait`, `completion`, `output`. Failures contain `kind`, `message`, and optional structured `diagnostics`. |
+
+Normally `started` precedes selection/idle events; each action has `action_started`,
+zero or more `heartbeat` events, then `action_finished`. A handled stop ends with
+`finished`. Idle events fire only on transitions/changes; `idle_finished` also fires
+on interruption/failure during idle. Envelope `ok` is false for an action or final
+failure, and `errors` includes `RUN_<KIND>` plus any project diagnostics. Event callbacks
+and output writes are synchronous; no second selection/execution loop is used.
+
+There is no routine stderr output in JSON mode unless `--verbose` is supplied.
+Help (`run --help --json`) and errors before run-log setup (usage, discovery, log
+creation) use the ordinary single envelope with no lifecycle event. Project validation
+and selection errors after setup emit `started` then `finished`. Consumers must check
+the process exit code even if output is incomplete. This event stream replaces the
+earlier provisional single-result `run --json` behavior; other CLI commands keep their
+existing contracts.
+
+Tests use disposable projects and fake commands, including gated children that cannot
+finish until the test receives live JSON heartbeats, multi-megabyte binary child output,
+closed output pipes, write/close failures, explicit retry round-trips, and real process
+group interruptions. See [run output verification](run-output-verification.md) for
+terminal/captured-output and platform evidence.
+
 ## Body updates and revisions
 
 `update --body-file path|-` replaces everything after the closing frontmatter
@@ -330,8 +584,9 @@ on a real body edit, while unrelated YAML values and file permissions survive.
 All JSON ticket summaries include an opaque `revision`, derived from the exact
 source bytes. It is additive in JSON schema version 1 and is not stored in ticket
 frontmatter. Consumers should retain the revision from the same read as their
-draft. The shared Go store accepts a single-item expected revision for future
-browser edits; this CLI batch does not expose a revision-precondition flag.
+draft. The shared Go store accepts an expected revision for the addressed item
+and a separate related-set precondition for browser edits; the CLI does not
+expose revision-precondition flags.
 See [the revision contract](storage.md#item-revisions-and-stale-edits) for scope,
 conflicts, reload/retry behavior, and remaining concurrency limits.
 
@@ -388,7 +643,8 @@ flag order. `--recursive` requires at least one label mutation and rejects title
 status, priority, body, or other metadata edits. It supports replacement, clearing,
 and incremental label modes with the same conflicts described above. Recursive
 replacement/clearing changes each target's entire label list; use add/remove to
-retain unrelated labels. Relationship and custom-field edits are single-ticket only.
+retain unrelated labels. Relationship and custom-field edits address one item and reject recursion;
+related-link removals may also update files that own incoming links.
 
 Recursive labeling selects the root **and** all descendants, at every depth and
 in every status, following parent edges only. It applies a snapshot, not
@@ -431,6 +687,47 @@ fail validation (exit 1) without publishing any part of a combined update.
 Parent and dependency cycles are checked separately: a parent may depend on its
 children. Explicit status changes remain allowed despite unfinished dependencies;
 reopening is allowed and changes never cascade. Only `done` satisfies an edge.
+
+## Related-item updates
+
+```sh
+wrk new "Implementation context" --related <id> --related <other-id>
+wrk update <id> --add-related <other-id> --remove-related <old-id>
+wrk update <id> --no-related
+```
+
+Creation rejects duplicate IDs. Update add/remove flags repeat and are idempotent,
+including repeated arguments, reverse adds, and removal of an absent edge.
+Every supplied endpoint must exist in the selected project and differ from the
+addressed ID, including remove arguments. Adding and removing the same ID is a
+usage conflict. `--no-related` conflicts with add/remove. Related changes can
+combine with all other single-item updates (body, title, status, parent,
+dependencies, priority, labels, and custom fields); recursion remains labels only.
+Cycles in related links are allowed and have no effect on readiness/status.
+
+The first endpoint to add a pair owns its sole stored `related` entry. A reverse
+add preserves ownership. Removal from either endpoint edits that owner's file;
+clear removes both incoming and outgoing edges. Removing the last outgoing edge
+leaves `related: []`; clearing/removing an already absent edge preserves exact
+bytes and inode. All changes validate before publication and preserve unrelated
+metadata, custom YAML, exact bodies, and permissions on every affected file.
+
+Every JSON summary includes `related` (sorted union of incoming/outgoing IDs) and
+`related_revision` (opaque token for that union). `show` human output includes
+reciprocal IDs; source output retains stored ownership. The HTTP detail adds a
+`related` array of full summaries, also used for browser navigation. Item source
+`revision` still covers exact file bytes only. See [revision scope](storage.md#related-link-publication).
+
+CLI related updates return `ticket`, `root_id` (addressed item), `changed`, and
+`updates: [{ticket, changed, publication}]`, even for one target or a no-op.
+Human output lists ID, path, and each file's publication state. Success and
+partial-failure reporting use the existing batch contract below. Reverse removals
+can modify several files; they are **not an atomic multi-file transaction**.
+See [related publication and retries](storage.md#related-link-publication).
+
+The optional field remains in format version 1. Upgrade all clients before use;
+older clients reject it. Existing files require no migration. See
+[format and compatibility](ticket-format.md#related-items).
 
 ## Custom-field input and updates
 
@@ -509,10 +806,12 @@ Human lists show ID, status, priority, title, and blockers. `show` separates der
 information from source. Terminal controls are escaped in human output. JSON uses
 standard escaping and retains source content exactly.
 
-Except for [serve lifecycle events](#serve-output), JSON is exactly one object
+Except for [serve lifecycle events](#serve-output) and [run events](#run-json-events), JSON is exactly one object
 plus newline on stdout, including ordinary failures;
 there is no duplicate routine stderr diagnostic. Human errors go to stderr.
-There are no prompts, progress messages, or incidental timestamps.
+Ordinary ticket commands have no prompts, progress messages, or incidental timestamps.
+`run` emits lifecycle events in JSON mode; `--verbose` additionally sends raw child
+output to stderr. See [scoped command execution](#scoped-command-execution).
 
 ```json
 {
@@ -529,6 +828,8 @@ There are no prompts, progress messages, or incidental timestamps.
       "status": "in-progress",
       "parent": null,
       "depends_on": [],
+      "related": [],
+      "related_revision": "<opaque related-set revision>",
       "priority": "normal",
       "labels": [],
       "blockers": []
@@ -542,7 +843,7 @@ There are no prompts, progress messages, or incidental timestamps.
 `project_root` is absolute, or null before discovery/selection identifies a root.
 It retains directory aliases as described in [project selection](#project-selection).
 Project paths are relative,
-slash-separated, and independent of cwd. Tickets, children, blockers, dependency
+slash-separated, and independent of cwd. Tickets, children, blockers, dependency/related
 IDs, and labels are lexicographically sorted. Empty arrays are `[]`, never null.
 Blocker objects contain `id` and `status`. Summary defaults are effective values
 and never cause omitted source fields to be inserted during updates.
@@ -554,9 +855,11 @@ and never cause omitted source fields to be inserted during updates.
 | `list` | `tickets` array of summaries |
 | `show` | `ticket`, exact full UTF-8 `source`, `children` summaries |
 | `update` (single ticket) | `ticket`, `changed` |
+| `update` with related changes | `ticket`, `root_id`, `updates` array of `{ticket, changed, publication}`, overall `changed` |
 | `update --recursive` | `root_id`, `updates` array of `{ticket, changed, publication}`, overall `changed` |
 | `validate` | `valid: true`, `ticket_count` |
 | `serve` | Lifecycle `event` and `url`; see [serve output](#serve-output). |
+| `run` | [Lifecycle event](#run-json-events); final `outcome` retains `successful`, `reason`, `elapsed_ns`, `last_action`, and optional `failure`. |
 | Help | `usage` string |
 
 `show.source` includes every custom value and the body; no lossy custom YAML-to-JSON
@@ -565,13 +868,14 @@ children and mutation results. Errors contain `code`, `message`, and applicable
 `path`, `field`, `line`, `column`, and involved `ids`.
 
 Exit 0 means success/help; 2 means usage error; 1 means operational/data error.
+`run` additionally exits 130 on SIGINT/SIGTERM interruption.
 Stable error codes include `USAGE`, `NOT_FOUND`, `INVALID_TARGET`, `ALREADY_EXISTS`,
 `INVALID_PROJECT`, `INVALID_CONFIG`, `INVALID_TICKET`, `INVALID_BODY`, `ID_MISMATCH`,
-`DUPLICATE_ID`, `MISSING_REFERENCE`, `SELF_REFERENCE`, `DUPLICATE_DEPENDENCY`, `CYCLE`,
+`DUPLICATE_ID`, `MISSING_REFERENCE`, `SELF_REFERENCE`, `DUPLICATE_DEPENDENCY`, `DUPLICATE_RELATED`, `CYCLE`,
 `CHECK_UNAVAILABLE`, `PROJECT_INVALID`, `BUSY`, `CONFLICT`, `ID_EXHAUSTED`, `IO`,
 `PRESERVATION_UNSUPPORTED`, `CLEANUP_FAILED`, and `DURABILITY_UNCERTAIN`.
 
-On pre-publication failure, `ok: false`, `result: null`, and existing ticket/config
+On a ticket mutation's pre-publication failure, `ok: false`, `result: null`, and existing ticket/config
 bytes remain unchanged. After publication, a later error retains the affected
 ID/path in `result`, adds `publication: "committed"`, and reports `ok: false`.
 Inspect before retrying. A killed process or failed stdout cannot promise an error

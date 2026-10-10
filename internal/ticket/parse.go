@@ -14,7 +14,7 @@ type Ticket struct {
 	Node                        *yaml.Node
 	ID, Title, Status, Priority string
 	Parent                      *string
-	DependsOn, Labels           []string
+	DependsOn, Labels, Related  []string
 	Path                        string
 }
 

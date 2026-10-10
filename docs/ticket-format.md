@@ -5,10 +5,15 @@ Each ticket is one UTF-8 Markdown file at `.wrk/<id>.md`. YAML frontmatter holds
 ## Editing contract
 
 - People and agents may directly edit everything after the closing frontmatter delimiter: descriptions, acceptance criteria, decisions, and handoff notes.
-- Create tickets and change all frontmatter through the CLI. This includes titles, statuses, parents, dependencies, priorities, labels, and custom-field values. IDs are immutable.
+- Create tickets and change all frontmatter through the CLI. This includes titles, statuses, parents, dependencies, related links, priorities, labels, and custom-field values. IDs are immutable.
+- The browser's create/edit/status controls use the same validated store and are also supported for the fields they expose. Priority and custom fields remain CLI-editable and are preserved by browser saves. Browser forms require the original source revision (and related-link revision) to reject stale saves; revisions are never stored in frontmatter.
 - The CLI validates changes before writing and preserves the existing Markdown body exactly unless `update --body-file path|-` explicitly replaces it. Empty supplied input clears the body. Body and metadata edits can be combined; failed validation leaves files unchanged.
 - CLI writers are serialized with a persistent lock. Updates compare all validation inputs immediately before publication and reject detected changes. Direct body/config edits and Git operations must happen outside CLI mutations: an editor save between the final comparison and replacement can still be lost. See [the storage boundary](storage.md).
 - These are repository conventions, not filesystem access controls. The `wrk validate` command will check repository integrity, including changes introduced by manual edits or Git merges; it cannot prove which tool made an edit.
+
+The external-editor boundary also applies to browser saves. See the
+[browser/agent walkthrough](browser.md#browser-and-agent-walkthrough) for working
+in both interfaces and reviewing conflicts without discarding a draft.
 
 This project's initial files were migrated before the CLI existed. The CLI now creates tickets with parent, dependency, priority, label, and custom-field values, and updates every mutable metadata field. Label edits also support recursive updates. Use `--no-parent` to clear parenting, `--add-dependency` / `--remove-dependency` to edit prerequisites, and `--field` / `--remove-field` for custom values. See the [CLI contract](cli.md) for syntax and conflict rules.
 
@@ -68,6 +73,7 @@ The references in this example are illustrative. Actual relationships must point
 | `status` | Yes | `todo`, `in-progress`, `blocked`, `done`, or `canceled`. |
 | `parent` | No | ID of the single ticket this work belongs to. Omit for a root ticket. |
 | `depends_on` | No | List of prerequisite ticket IDs; absent means no dependencies. |
+| `related` | No | Contextual ticket IDs stored on this endpoint; reciprocal display is derived. Absent means no outgoing links. |
 | `priority` | No | `low`, `normal`, `high`, or `urgent`; absent means `normal`. |
 | `labels` | No | List of nonempty strings; duplicates are allowed; absent means no labels. |
 | `fields` | No | Map of project-specific values; absent means no custom values. |
@@ -87,6 +93,34 @@ Only files matching the ticket ID filename pattern are tickets. `.wrk/config.yam
 A ticket can have one parent and any number of children. Store only `parent` on the child; derive the child list. There are no separate epic, story, and subtask formats, and no fixed hierarchy depth.
 
 Dependencies express prerequisites independently of parenting. Parents and dependencies must exist in the same project. Reject self-references, duplicate dependencies, cycles in the parent graph, and cycles in the dependency graph. Check these graphs separately: a parent may legitimately depend on its children.
+
+### Related items
+
+`related` is an optional list of existing same-project IDs. Each unordered pair
+is stored **once**, on the endpoint that first adds it. That file remains the
+owner until removal; ID ordering does not choose ownership. Do not add a mirrored
+entry to the other endpoint. Validation rejects self links, duplicate entries,
+and the same pair stored on both endpoints. Cycles are allowed. Parent and
+dependency checks remain independent; related links never affect readiness,
+status, descendants, or blockers. External URLs remain ordinary Markdown links.
+
+Reads derive a sorted, deduplicated union of incoming and outgoing links. The
+source disclosure still shows the actual stored list. Add/remove works from
+either endpoint; a reverse add is a no-op and a reverse removal edits the owner's
+file. Clearing removes all incident links, including incoming links. See
+[CLI semantics](cli.md#related-item-updates) and
+[batch publication/recovery](storage.md#related-link-publication).
+
+This optional field extends **format version 1** deliberately, following the
+existing `blocked` status extension. Existing files and config require no
+migration or rewrite. Older strict clients reject the unknown `related` key and
+may refuse all project data commands once any file uses it, including an empty
+list. Upgrade **all CLI and running server clients** to a build supporting related
+links before first use. They fail validation rather than silently discarding
+links. Removing the last link leaves `related: []`; clearing does not restore
+older-client compatibility. No automatic downgrade or format migration is provided.
+
+### Dependency readiness
 
 An unfinished dependency is a blocker. Only `done` satisfies a dependency; `canceled` and `blocked` do not. Dependency blockers are derived separately from status and do not prohibit an explicit status change. Ready means `todo` with every dependency `done`.
 

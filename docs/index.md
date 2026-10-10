@@ -8,16 +8,33 @@ Use this project's own CLI to track work in [`.wrk/`](../.wrk/). Follow the [dai
 - [Project configuration](configuration.md)
 - [Explicit project/config selection and path behavior](cli.md#project-selection)
 - [CLI commands and output contract](cli.md)
+- [Scoped command execution, continuous polling, success checks, and explicit retry](cli.md#scoped-command-execution)
+- [Run logs, terminal progress, and JSON events](cli.md#run-output-and-logs) and [verification evidence](run-output-verification.md)
 - [Local server, read APIs, lifecycle output, and resource limits](cli.md#local-server)
+- [Compact workspace layout](browser.md#compact-workspace-layout)
 - [Browser filters, navigation, Markdown policy, and browser verification](browser.md)
+- [Hierarchical rows, expansion, counts, and legacy focus links](browser.md#hierarchy-and-expansion)
+- [Inline child context/insertion hook](browser.md#hierarchy-implementation-handoff)
+- [Creation modal, reusable pickers, editing, conflicts, and save recovery](browser.md#creating-and-editing)
+- [Row status changes and repeated inline child creation](browser.md#row-status-and-repeated-child-creation)
+- [Direct detail editing and shared metadata/text revision coordination](browser.md#direct-detail-editing)
+- [HTTP mutation contract](cli.md#browser-mutations)
 - [Live polling, recovery, and the dirty-draft interface](browser.md#live-updates-and-recovery)
 - [Body updates](cli.md#body-updates-and-revisions) and [stale-edit revisions](storage.md#item-revisions-and-stale-edits)
 - [Parent and dependency edits](cli.md#relationship-updates) and [typed custom fields](cli.md#custom-field-input-and-updates)
+- [Related items: storage and compatibility](ticket-format.md#related-items), [CLI edits](cli.md#related-item-updates), and [publication/retry rules](storage.md#related-link-publication)
 - [Storage, concurrency, and recovery](storage.md)
 - [Release packaging, publication, and upgrade verification](releases.md)
 - [v0.1.0 platform and upgrade verification evidence](release-verification.md)
+- [Complete browser/agent workflow and packaged workspace verification](workspace-verification.md)
+- [Compact workflow acceptance, screenshots, platform checks and limitations](compact-workspace-verification.md)
+- [Keyboard workflow and focus return](browser.md#keyboard-workflow)
+- [Two-terminal browser and agent walkthrough](browser.md#browser-and-agent-walkthrough)
 - [Scoped agent burn loop and durable handoffs](burns.md)
-- [Minimal command-driven Codex runner](burns.md#minimal-codex-runner)
+- [Codex burns through wrk run, wrapper migration, and explicit recovery](burns.md#minimal-codex-runner)
+- [Integrated burn migration and platform verification](burn-verification.md)
+- [Scoped runner milestone acceptance](burn-verification.md#parent-acceptance-review)
+- [Linux container verification isolation](browser.md#linux-verification-isolation)
 - [Development checks and integration-test cache behavior](../README.md#developing-wrk-with-wrk)
 
 Agents may edit ticket bodies directly. Creation and changes to frontmatter, relationships, or status go through the CLI. Project configuration may be edited directly.
@@ -96,6 +113,12 @@ for the initial milestones and deferred scope.
 - [wrk-c12ff4c6: Support custom-field creation and updates](../.wrk/wrk-c12ff4c6.md) — done
 - [wrk-d965ba66: Scoped AI task burns](../.wrk/wrk-d965ba66.md) — labels, descendant scopes, blocked status, and the burn workflow
 
+CLI automation:
+
+- [wrk-0a233d21: Run scoped ticket actions from the CLI](../.wrk/wrk-0a233d21.md) — done, including all four children and the parent's acceptance review. Native command execution, continuous waiting, readable progress/logs, explicit retries, and Codex burn migration are implemented and verified; see [parent acceptance evidence](burn-verification.md#parent-acceptance-review).
+- [wrk-8f6d1169: Run CLI decisions and backlog organization](../.wrk/wrk-8f6d1169.md) — accepted scope and the decision to keep scripts responsible for recovery, without workflow checkpoints or automatic retries.
+- Inspect the completed batch with `go run ./cmd/wrk list --all --label run-cli`. Existing script history remains in [wrk-c30c139f](../.wrk/wrk-c30c139f.md).
+
 Release and upgrade work:
 
 - [wrk-551ff6c2: Publish versioned binaries](../.wrk/wrk-551ff6c2.md) — version metadata, platform packaging, and release publication.
@@ -104,8 +127,10 @@ Release and upgrade work:
 Local web workspace:
 
 - [wrk-a1561423: Serve a local web workspace with live agent updates](../.wrk/wrk-a1561423.md) — local-only server, explicit project/config selection, bundled browser UI, live changes from agents, safe editing, and related links. Eight child tickets carry implementation and verification; the milestone contains their dependency order.
-- [wrk-4036f7d4: Web workspace discovery](../.wrk/wrk-4036f7d4.md) — confirmed user intent and scope decisions. `serve` provides searchable list/detail browsing, validated read APIs, and automatic refresh; browser editing remains in the backlog.
-- List the complete batch with `go run ./cmd/wrk list --all --label web`; select ready implementation work with `go run ./cmd/wrk list --ready --under wrk-a1561423`.
+- [wrk-4036f7d4: Web workspace discovery](../.wrk/wrk-4036f7d4.md) — confirmed user intent and scope decisions. `serve` provides searchable list/detail browsing, validated APIs, automatic refresh, and revision-checked browser creation/editing.
+- [wrk-d70e8056: Compact table-first web UX](../.wrk/wrk-d70e8056.md) — done, including all six children and the parent's acceptance review. Compact shell, hierarchical filtering/title search, creation modal, direct detail editing and inline child creation are implemented and verified. See [current integrated evidence](compact-workspace-verification.md).
+- [wrk-14ac1a9c: Compact UX discovery](../.wrk/wrk-14ac1a9c.md) — user direction, accepted recommendations, and organization of the redesign backlog.
+- List all web history with `go run ./cmd/wrk list --all --label web`, or the redesign with `go run ./cmd/wrk list --all --label web-ux`. Select ready redesign work with `go run ./cmd/wrk list --ready --under wrk-d70e8056`.
 
 ## Sprint plans
 

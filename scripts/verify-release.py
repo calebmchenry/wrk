@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate all packaged assets and embedded Go metadata; execute the native asset.
+"""Validate packaged assets/Go metadata; run the native standalone workspace.
 
 Usage: python3 scripts/verify-release.py dist
 Requires Go for portable build-info inspection. Cross-platform inspection is not
@@ -56,6 +56,7 @@ for name in sorted(expected):
             info = envelope["result"]
             assert envelope["ok"] and envelope["project_root"] is None
             assert (info["version"], info["commit"], info["build_kind"], info["goos"], info["goarch"]) == (version, commit, kind, os_name, arch)
-            print(f"{name}: checksum, contents, metadata, native execution OK")
+            subprocess.run([sys.executable, str(pathlib.Path(__file__).with_name("verify-workspace.py")), str(executable)], check=True)
+            print(f"{name}: checksum, contents, metadata, native workspace execution OK")
         else:
             print(f"{name}: checksum, contents, metadata OK (cross-built; not executed here)")

@@ -29,7 +29,7 @@ func Validate(t *Ticket, definitions map[string]FieldDefinition) []diagnostic.Di
 	if n == nil {
 		return nil
 	}
-	allowed := map[string]bool{"id": true, "title": true, "status": true, "parent": true, "depends_on": true, "priority": true, "labels": true, "fields": true}
+	allowed := map[string]bool{"id": true, "title": true, "status": true, "parent": true, "depends_on": true, "related": true, "priority": true, "labels": true, "fields": true}
 	ds := schema.Keys(n, allowed, t.Path, "", "INVALID_TICKET")
 	m := schema.Map(n)
 	add := func(field, message string) {
@@ -68,7 +68,7 @@ func Validate(t *Ticket, definitions map[string]FieldDefinition) []diagnostic.Di
 			t.Priority = s
 		}
 	}
-	for _, key := range []string{"depends_on", "labels"} {
+	for _, key := range []string{"depends_on", "labels", "related"} {
 		if v, exists := m[key]; exists {
 			ss, ok := schema.StringList(v, true)
 			if !ok {
@@ -78,10 +78,14 @@ func Validate(t *Ticket, definitions map[string]FieldDefinition) []diagnostic.Di
 			if key == "labels" {
 				t.Labels = ss
 			} else {
-				t.DependsOn = ss
+				if key == "related" {
+					t.Related = ss
+				} else {
+					t.DependsOn = ss
+				}
 				for _, s := range ss {
 					if !IDPattern.MatchString(s) {
-						add(key, "dependencies must contain ticket IDs")
+						add(key, "relationships must contain ticket IDs")
 						break
 					}
 				}

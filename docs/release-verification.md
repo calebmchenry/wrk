@@ -1,5 +1,9 @@
 # v0.1.0 verification evidence
 
+This records the published v0.1.0 only. The later local browser workspace has
+separate [snapshot/runtime verification evidence](workspace-verification.md);
+those checks do not imply a new published release.
+
 Source: `14242c8c700c7af77cd0d0c9a1c48f892d6ee7c7`.
 Tag: `v0.1.0`. Verification date: 2026-10-02.
 

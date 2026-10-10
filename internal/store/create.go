@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"io"
@@ -18,17 +19,26 @@ type CreateOptions struct {
 	Labels           []string
 	LabelsSet        bool
 	Dependencies     []string
+	Related          []string
 	Fields           []ticket.FieldValue
 }
 
 func Create(root string, options CreateOptions) Mutation {
 	return create(root, options, rand.Reader, nil)
 }
+
+// CreateContext retains the CLI mutation protocol with bounded service reads.
+func CreateContext(ctx context.Context, root string, options CreateOptions, limits project.ReadLimits) Mutation {
+	return createContext(ctx, root, options, limits, rand.Reader, nil)
+}
 func create(root string, options CreateOptions, random io.Reader, h *hooks) Mutation {
+	return createContext(context.Background(), root, options, project.ReadLimits{}, random, h)
+}
+func createContext(ctx context.Context, root string, options CreateOptions, limits project.ReadLimits, random io.Reader, h *hooks) Mutation {
 	if err := ticket.ValidateFields(options.Fields, nil); err != nil {
 		return Mutation{Diagnostics: []diagnostic.Diagnostic{diagnostic.New("USAGE", err.Error(), "")}}
 	}
-	return withLock(root, nil, func(s *project.Snapshot) Mutation {
+	return withLock(ctx, limits, root, nil, func(s *project.Snapshot) Mutation {
 		result := Mutation{Snapshot: s, Diagnostics: []diagnostic.Diagnostic{}}
 		for attempt := 0; attempt < 128; attempt++ {
 			token := make([]byte, 4)
@@ -56,7 +66,7 @@ func create(root string, options CreateOptions, random io.Reader, h *hooks) Muta
 			if options.LabelsSet {
 				labels = options.Labels
 			}
-			data, err := ticket.CreateWithMetadata(id, options.Title, priority, options.Parent, labels, options.Dependencies, options.Fields, options.Body)
+			data, err := ticket.CreateWithRelated(id, options.Title, priority, options.Parent, labels, options.Dependencies, options.Related, options.Fields, options.Body)
 			if err != nil {
 				result.Diagnostics = append(result.Diagnostics, operationError(err, path, false))
 				return result
@@ -75,7 +85,7 @@ func create(root string, options CreateOptions, random io.Reader, h *hooks) Muta
 			if publication.collision {
 				// An external creator may win the final link race. Refresh and revalidate
 				// all inputs before another ID attempt; never adopt an invalid project.
-				s = project.Load(root)
+				s = project.LoadContext(ctx, root, limits)
 				result.Snapshot = s
 				if len(s.Diagnostics) > 0 {
 					result.Diagnostics = s.Diagnostics
@@ -86,6 +96,11 @@ func create(root string, options CreateOptions, random io.Reader, h *hooks) Muta
 			result.Committed = publication.Committed
 			result.Created = publication.Committed
 			result.Ticket = t
+			if publication.Committed {
+				s.ByID[t.ID] = t
+				s.Tickets = append(s.Tickets, t)
+				s.InvalidateRelationships()
+			}
 			if publication.Err != nil {
 				result.Diagnostics = append(result.Diagnostics, operationError(publication.Err, path, result.Committed))
 			}

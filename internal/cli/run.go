@@ -136,8 +136,11 @@ func run(args []string, cwd string, in io.Reader, out, errout io.Writer, updater
 	if r.Command == "serve" {
 		return runServe(r, root, out, errout)
 	}
+	if r.Command == "run" {
+		return runActions(r, root, cwd, out, errout)
+	}
 	if r.Command == "new" {
-		result := store.Create(root, store.CreateOptions{Title: r.Args[0], Body: body, Parent: r.Parent, Priority: r.Priority, Labels: r.Labels, LabelsSet: r.NoLabels || len(r.Labels) > 0, Dependencies: r.Dependencies, Fields: r.Fields})
+		result := store.Create(root, store.CreateOptions{Title: r.Args[0], Body: body, Parent: r.Parent, Priority: r.Priority, Labels: r.Labels, LabelsSet: r.NoLabels || len(r.Labels) > 0, Dependencies: r.Dependencies, Related: r.Related, Fields: r.Fields})
 		return renderMutation(out, errout, r, e, result)
 	}
 	if r.Command == "update" {
@@ -170,8 +173,12 @@ func run(args []string, cwd string, in io.Reader, out, errout io.Writer, updater
 		t := s.ByID[r.Args[0]]
 		summary := s.Summary(t)
 		children := s.Children(t.ID)
+		related := strings.Join(summary.Related, ", ")
+		if related == "" {
+			related = "none"
+		}
 		e.Result = map[string]any{"ticket": summary, "source": string(t.Source), "children": children}
-		human = string(t.Source) + "\n--- Derived information ---\nChildren:\n" + listText(children) + "\nBlockers: " + blockerText(summary.Blockers)
+		human = string(t.Source) + "\n--- Derived information ---\nChildren:\n" + listText(children) + "\nBlockers: " + blockerText(summary.Blockers) + "\nRelated: " + related
 	}
 	e.OK = len(e.Errors) == 0
 	code := 0
@@ -250,6 +257,9 @@ func renderRecursiveMutation(out, errout io.Writer, r Request, e Envelope, m sto
 			lines = append(lines, fmt.Sprintf("%s\t%s\t%s", summary.ID, summary.Path, update.Publication))
 		}
 		result := map[string]any{"root_id": m.Ticket.ID, "updates": entries, "changed": m.Changed}
+		if !r.Recursive {
+			result["ticket"] = m.Snapshot.Summary(m.Ticket)
+		}
 		if m.Committed && !e.OK {
 			result["publication"] = "committed"
 			lines = append(lines, "Partial or uncertain publication; inspect all targets before retrying.")

@@ -17,12 +17,15 @@ candidate inventory, identities and bytes again, and then publish. Creation uses
 an atomic no-replace hard link. Updates use atomic rename and preserve permission
 bits. New files honor umask. Flush the directory after publication.
 
-CLI writers are serialized. External changes visible at the final comparison
+CLI and browser writers share the same lock and publication path. External changes visible at the final comparison
 are rejected with CONFLICT, including changes to unrelated validation inputs.
 **The comparison and replacement are separate operations. An editor or Git change
 between them may be lost or invalidate the candidate.** Direct body/config edits
 and Git operations must occur outside a CLI mutation. This accepted boundary is
 not filesystem compare-and-swap or protection against hostile ancestor changes.
+The same external-editor boundary applies during browser mutations: keep direct
+body/config edits and Git operations between all saves. An idle server or a read
+poll holds no writer lock and does not prevent those external operations.
 
 Pre-publication failures leave preexisting ticket/config data unchanged. Successful
 link/rename is the publication point: later errors return affected ID/path and
@@ -61,7 +64,7 @@ with PRESERVATION_UNSUPPORTED.
 including frontmatter delimiters, comments, formatting, custom values, and body.
 The current encoding is `sha256:` plus the lowercase hexadecimal SHA-256 digest;
 callers should round-trip the token without interpreting it. `Snapshot.Summary`
-includes this revision, so CLI list/show/mutation summaries and future HTTP reads
+includes this revision, so CLI list/show/mutation summaries and HTTP reads
 use the same definition. Compute it from the source in the read snapshot, never
 from a separately reread file. No revision is stored on disk.
 
@@ -136,3 +139,53 @@ children added since the original invocation. Confirm the scope if relationships
 changed. No automatic inheritance, transaction journal, or rollback is provided.
 Abandoned stages are ignored and only removed manually when no CLI writer is
 active; an interrupted process releases its OS lock.
+
+## Related-link publication
+
+Each unordered pair has one stored edge on the endpoint that first added it.
+Creation writes only the new item. Updates plan ordinary changes on the addressed
+item plus removal of incoming edges on their owner files. Reverse adds are no-ops;
+we never copy or move an existing edge to another owner. Every individual candidate
+and every published prefix is a valid graph. The store validates all candidates
+and stages all changed files before publishing any, using the same lock,
+preservation checks, comparison, sorted ID order, cleanup, and per-file result
+states as recursive labeling. The addressed item is included even if unchanged.
+Only its requested ordinary fields may change; other owners receive link removals.
+
+This is **not** a multi-file transaction. Before publication a failure changes no
+ticket data. After a successful rename, a later failure reports overall
+`publication: "committed"` and entries marked `committed`, `unchanged`, or `pending`.
+A target can be pending/unchanged while some owner removals have committed. Reads
+can observe a valid partial link set. Do not roll back or blindly retry. Inspect
+all entries, resynchronize, resolve the failure, and explicitly retry the intended
+operation. A CLI retry finds the remaining owners under a fresh lock; already
+removed edges become no-ops. Retrying clear also clears links newly added since
+the first request. Browser retries require explicit review and new preconditions,
+and reconcile individual add/remove intent against the reviewed set.
+
+`related_revision` is a separate opaque content token for the sorted reciprocal
+ID set and addressed ID, derived from the same snapshot as `revision`. It excludes
+owner orientation, other items' bodies/metadata, timestamps, and config. An
+incoming add/remove changes it even when the addressed file's source revision
+is identical. Restoring the same link set restores the token. The store's optional
+`ExpectedRelatedRevision` checks this token under the writer lock, before staging
+or a no-op; stale sets return `CONFLICT`. Source preconditions retain their existing
+behavior. Invalid project data is still rejected, and final comparison checks all
+validation inputs before each publication. Neither token bypasses preservation,
+validation, or the accepted external-editor race boundary. Recursive label updates
+reject either precondition. HTTP link edits require both tokens; the browser sends
+both for every edit and never advances either while polling.
+
+## Bounded browser mutations
+
+The HTTP service calls `store.CreateContext` / `store.UpdateContext`, retaining the
+same locking, candidate validation, preservation, and publication path as the CLI.
+The request context and read limits apply inside the writer lock (and creation
+collision reloads), not only to a preliminary read. Snapshots retain those limits
+for candidate file/total byte checks and final comparison. Comparison reads need
+only the original byte length plus one; changed size is a conflict. Cancellation
+or resource-limit failures during initial loading are reported before revision
+checks so a partially loaded snapshot cannot masquerade as a deleted target.
+Ordinary CLI calls retain unlimited loading. These bounds do not make individual
+YAML/graph operations or filesystem syscalls preemptible, or change the accepted
+external-editor publication boundary.

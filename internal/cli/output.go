@@ -18,8 +18,16 @@ Usage:
   wrk serve [--port 0..65535] [--open]
   wrk new "Title" [--body-file path|-] [--parent id] [--priority value]
                   [--label value ... | --no-labels] [--depends-on id ...]
-                  [--field name=YAML ...]
+                  [--related id ...] [--field name=YAML ...]
   wrk list [--all | --ready] [--label value ...] [--under id]
+  wrk run [--all | --ready] [--label value ...] [--under id]
+          [--stream [--poll-interval duration]]
+          [--expect-status status] [--max-tickets N]
+          [--log-dir directory] [--heartbeat-interval duration] [--verbose]
+          -- command [arguments...]
+  wrk run --ticket id [--expect-status status] [--max-tickets N]
+          [--log-dir directory] [--heartbeat-interval duration] [--verbose]
+          -- command [arguments...]
   wrk show <id>
   wrk update <id> [--title "Title"] [--status todo|in-progress|blocked|done|canceled]
                   [--body-file path|-]
@@ -28,14 +36,15 @@ Usage:
                    --add-label value ... --remove-label value ...] [--recursive]
                   [--parent id | --no-parent]
                   [--add-dependency id ...] [--remove-dependency id ...]
+                  [--add-related id ...] [--remove-related id ...] [--no-related]
                   [--field name=YAML ...] [--remove-field name ...]
   wrk validate
   wrk help [command]
 
-Project selection for new, list, show, update, validate, and serve:
+Project selection for new, list, show, update, validate, serve, and run:
   --project directory | --config directory/.wrk/config.yaml
 Selectors may precede or follow the command and override cwd discovery.
-Relative paths (including --body-file) resolve from the invocation directory.
+Relative selectors and --body-file resolve from the invocation directory.
 Explicit selection requires an existing project; it never searches ancestors.
 Without a selector, use the nearest .wrk boundary from cwd.
 Init uses its positional directory; help/version/upgrade do not use selectors.
@@ -51,6 +60,10 @@ only label changes are allowed. Add/remove of the same label conflicts.
 Recursive writes publish one ticket at a time; inspect partial failures before retrying.
 Parent/dependency edits validate references and each graph's cycles independently.
 Dependency add/remove is idempotent; adding and removing the same ID conflicts.
+Related links display and can be added/removed from either endpoint; cycles are allowed.
+--no-related clears all incident links and conflicts with add/remove.
+Related add/remove is idempotent; adding and removing the same ID conflicts.
+Reverse removals may publish multiple files; inspect per-file results before retrying.
 --field sets a typed YAML value; quote YAML strings that resemble numbers/booleans.
 Field names split at the first unescaped =; escape name characters as \= or \\.
 Each field value is an independent YAML document.
@@ -65,6 +78,31 @@ The bundled local page needs no separate installation. --open opts into opening
 the printed URL in a browser. Ctrl-C stops the server. Serve --json emits one
 envelope per line: started, optional warning, then stopped (or error).
 Failures before listening use the ordinary single error envelope.
+
+Run requires -- followed by a nonempty command; everything after -- is literal.
+Replace every {id} in child arguments, never in the executable; no implicit shell.
+Run uses list filters and ID order, re-querying after each successful action and
+skipping IDs already successful in this invocation. --ticket bypasses readiness
+and conflicts with query filters and --stream. Retries start from the beginning.
+Ordinary run exits when no unprocessed matches remain. --stream waits instead;
+--poll-interval requires --stream and a positive duration (default 5s).
+Poll only while idle; successful IDs stay skipped across polls and status changes.
+An empty ready query does not mean the project's work is complete.
+Exit 0 succeeds; --expect-status additionally checks the persisted built-in status
+(todo, in-progress, blocked, done, canceled). Missing/invalid tickets fail too.
+--max-tickets requires a positive successful-action count. Failures stop at once.
+Children run in the selected project root with inherited environment/PATH and
+closed stdin. Relative executable paths and child arguments use that root.
+Ctrl-C/SIGTERM interrupt idle waits or stop the active process group (exit 130);
+partial changes remain. Streaming never retries failures or ignores invalid data.
+Run changes no metadata itself. Full logs go to timestamped .wrk-runs/ directories
+in the selected project. --log-dir overrides the base, relative to invocation cwd.
+--heartbeat-interval is a positive duration (default 60s); reports elapsed time and
+actual child output recency. --verbose mirrors child bytes to stderr and disables
+terminal line updates. Default output is quiet child logs plus lifecycle progress.
+Run --json emits version-1 envelopes, one per lifecycle event, promptly to stdout;
+raw child output never goes to JSON stdout, even with --verbose. Help and failures
+before run-log setup retain ordinary single envelopes. Logs are not checkpoints.
 
 Every command supports --json and --help. Flags may precede or follow
 positional arguments. Use --flag=value or -- to end option parsing.

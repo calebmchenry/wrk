@@ -3,6 +3,7 @@
 **/.wrk/.lock
 **/.wrk/.wrk-stage-*
 /.wrk-burn/
+/.wrk-runs/
 
 /node_modules/
 /playwright-report/

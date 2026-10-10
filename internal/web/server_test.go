@@ -160,11 +160,11 @@ func TestIsolationAndRequestPolicy(t *testing.T) {
 	} {
 		decode(t, request(h, "GET", "/api/project", headers), 200)
 	}
-	// Unsafe methods must pass the future write guard, then remain unsupported.
+	// Unsafe methods must pass the write guard, then validate JSON.
 	for _, headers := range []map[string]string{nil, {"Origin": "http://127.0.0.1:7331"}, {"Content-Type": "application/json"}, {"Origin": "http://127.0.0.1:7331", "Content-Type": "text/plain"}} {
 		decode(t, request(h, "POST", "/api/items", headers), 403)
 	}
-	decode(t, request(h, "POST", "/api/items", map[string]string{"Origin": "http://127.0.0.1:7331", "Content-Type": "application/json"}), 405)
+	decode(t, request(h, "POST", "/api/items", map[string]string{"Origin": "http://127.0.0.1:7331", "Content-Type": "application/json"}), 400)
 	decode(t, request(h, "OPTIONS", "/api/items", nil), 403)
 	for _, header := range []string{"Origin", "Sec-Fetch-Site"} {
 		r := httptest.NewRequest("GET", "/api/project", nil)

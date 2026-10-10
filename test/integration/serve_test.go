@@ -12,7 +12,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -27,9 +29,15 @@ type serveProcess struct {
 
 func startServe(t *testing.T, executable, cwd string, args ...string) *serveProcess {
 	t.Helper()
+	return startServeEnv(t, executable, cwd, nil, args...)
+}
+
+func startServeEnv(t *testing.T, executable, cwd string, env []string, args ...string) *serveProcess {
+	t.Helper()
 	p := &serveProcess{events: make(chan envelope, 8), done: make(chan error, 1)}
 	p.cmd = exec.Command(executable, args...)
 	p.cmd.Dir = cwd
+	p.cmd.Env = env
 	p.cmd.Stderr = &p.stderr
 	reader, writer := io.Pipe()
 	p.cmd.Stdout = writer
@@ -76,7 +84,11 @@ func (p *serveProcess) event(t *testing.T, want string) envelope {
 }
 func (p *serveProcess) stop(t *testing.T) {
 	t.Helper()
-	if err := p.cmd.Process.Signal(os.Interrupt); err != nil {
+	p.stopSignal(t, os.Interrupt)
+}
+func (p *serveProcess) stopSignal(t *testing.T, signal os.Signal) {
+	t.Helper()
+	if err := p.cmd.Process.Signal(signal); err != nil {
 		t.Fatal(err)
 	}
 	if e := p.event(t, "stopped"); !e.OK {
@@ -99,7 +111,7 @@ func (p *serveProcess) stop(t *testing.T) {
 	addr := strings.TrimSuffix(strings.TrimPrefix(p.url, "http://"), "/")
 	if c, err := net.DialTimeout("tcp4", addr, time.Second); err == nil {
 		c.Close()
-		t.Fatal("listener survived Ctrl-C")
+		t.Fatal("listener survived shutdown signal", signal)
 	}
 }
 func getServe(t *testing.T, url string, status int) []byte {
@@ -137,6 +149,7 @@ func TestServeSelectionAndLifecycle(t *testing.T) {
 		args      []string
 	}{
 		{"nested", nested, []string{"serve", "--port=0", "--json"}},
+		{"root", root, []string{"serve", "--port=0", "--json"}},
 		{"project", other, []string{"--project", root, "serve", "--port=0", "--json"}},
 		{"config", other, []string{"serve", "--config", filepath.Join(root, ".wrk/config.yaml"), "--port=0", "--json"}},
 	} {
@@ -164,6 +177,107 @@ func TestServeSelectionAndLifecycle(t *testing.T) {
 				getServe(t, p.url+"api/items/"+id, 200)
 			}
 			p.stop(t)
+		})
+	}
+	for _, selector := range []string{"--project", "--config"} {
+		t.Run("relative-"+selector, func(t *testing.T) {
+			target := root
+			if selector == "--config" {
+				target = filepath.Join(root, ".wrk/config.yaml")
+			}
+			relative, err := filepath.Rel(other, target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := startServe(t, binary, other, "serve", selector, relative, "--port=0", "--json")
+			if data := getServe(t, p.url+"api/items/"+id, 200); !bytes.Contains(data, []byte(root)) {
+				t.Fatal(string(data))
+			}
+			p.stopSignal(t, syscall.SIGTERM)
+		})
+	}
+}
+
+func TestServeDefaultAndRequestedPorts(t *testing.T) {
+	root := t.TempDir()
+	run(t, root, "", 0, "init", "--json")
+	for _, address := range []string{"127.0.0.1:7331", "127.0.0.1:0"} {
+		t.Run(address, func(t *testing.T) {
+			listener, err := net.Listen("tcp4", address)
+			if err != nil {
+				if address == "127.0.0.1:7331" {
+					t.Skip("default port already occupied:", err)
+				}
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			actual := listener.Addr().String()
+			args := []string{"serve", "--json"}
+			if address != "127.0.0.1:7331" {
+				_, port, err := net.SplitHostPort(actual)
+				if err != nil {
+					t.Fatal(err)
+				}
+				args = append(args, "--port="+port)
+			}
+			if e := run(t, root, "", 1, args...); e.Errors[0].Code != "LISTEN" {
+				t.Fatal(e)
+			}
+			if err := listener.Close(); err != nil {
+				t.Fatal(err)
+			}
+			p := startServe(t, binary, root, args...)
+			if p.url != "http://"+actual+"/" {
+				t.Fatal("port changed", p.url, actual)
+			}
+			getServe(t, p.url+"api/project", 200)
+			p.stopSignal(t, syscall.SIGTERM)
+		})
+	}
+}
+
+func TestServeOpenExecutable(t *testing.T) {
+	root, helpers := t.TempDir(), t.TempDir()
+	run(t, root, "", 0, "init", "--json")
+	name := "xdg-open"
+	if runtime.GOOS == "darwin" {
+		name = "open"
+	}
+	// Use a controlled launcher on PATH, never a developer's desktop browser.
+	launcher := filepath.Join(helpers, name)
+	for _, fail := range []bool{false, true} {
+		t.Run(map[bool]string{false: "success", true: "failure"}[fail], func(t *testing.T) {
+			script := "#!/bin/sh\n[ \"$#\" = 1 ] || exit 2\nprintf '%s' \"$1\" > opened-url\n"
+			if fail {
+				script += "exit 1\n"
+			}
+			if err := os.WriteFile(launcher, []byte(script), 0755); err != nil {
+				t.Fatal(err)
+			}
+			p := startServeEnv(t, binary, root, []string{"PATH=" + helpers}, "serve", "--port=0", "--open", "--json")
+			if fail {
+				e := p.event(t, "warning")
+				warning := result(t, e)["warning"].(map[string]any)
+				if !e.OK || warning["code"] != "OPEN_BROWSER" {
+					t.Fatal(e)
+				}
+			}
+			deadline := time.Now().Add(3 * time.Second)
+			for {
+				data, err := os.ReadFile(filepath.Join(root, "opened-url"))
+				if err == nil && string(data) == p.url {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("launcher did not receive the actual URL", string(data), err)
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			getServe(t, p.url+"api/project", 200)
+			p.stop(t)
+			if err := os.Remove(filepath.Join(root, "opened-url")); err != nil {
+				t.Fatal(err)
+			}
 		})
 	}
 }
@@ -259,6 +373,22 @@ func TestPackagedBinaryServesEmbeddedAssets(t *testing.T) {
 	live := getServe(t, p.url+"live.mjs", 200)
 	if !bytes.Contains(live, []byte("export function createPoller")) {
 		t.Fatal("missing browser live module")
+	}
+	editor := getServe(t, p.url+"editor.mjs", 200)
+	if !bytes.Contains(editor, []byte("export function createEditor")) {
+		t.Fatal("missing browser editing module")
+	}
+	detail := getServe(t, p.url+"detail.mjs", 200)
+	if !bytes.Contains(detail, []byte("export function createDetailEditor")) {
+		t.Fatal("missing browser detail module")
+	}
+	inline := getServe(t, p.url+"inline.mjs", 200)
+	if !bytes.Contains(inline, []byte("export function createInlineChildren")) {
+		t.Fatal("missing browser inline creation module")
+	}
+	pickers := getServe(t, p.url+"pickers.mjs", 200)
+	if !bytes.Contains(pickers, []byte("export function createItemPicker")) {
+		t.Fatal("missing browser picker module")
 	}
 	if !bytes.Contains(html, []byte("Local workspace")) {
 		t.Fatal(string(html))

@@ -16,6 +16,9 @@ import (
 var binary string
 
 func TestMain(m *testing.M) {
+	if os.Getenv("WRK_RUN_TEST_HELPER") == "1" {
+		os.Exit(m.Run())
+	}
 	dir, err := os.MkdirTemp("", "wrk-integration-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
