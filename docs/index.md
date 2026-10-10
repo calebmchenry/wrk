@@ -35,7 +35,8 @@ Use this project's own CLI to track work in [`.wrk/`](../.wrk/). Follow the [dai
 - [Integrated burn migration and platform verification](burn-verification.md)
 - [Scoped runner milestone acceptance](burn-verification.md#parent-acceptance-review)
 - [Linux container verification isolation](browser.md#linux-verification-isolation)
-- [Development checks and integration-test cache behavior](../README.md#developing-wrk-with-wrk)
+- [User installation, release binaries, and source builds](install.md)
+- [Development checks and integration-test cache behavior](development.md)
 
 Agents may edit ticket bodies directly. Creation and changes to frontmatter, relationships, or status go through the CLI. Project configuration may be edited directly.
 

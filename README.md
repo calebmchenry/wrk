@@ -1,370 +1,231 @@
 # wrk
 
-wrk is a local CLI for project tasks. Tickets live as Markdown files in `.wrk/`
-alongside your code and travel through Git branches, commits, and reviews. Agents
-can read the work and edit descriptions directly; the CLI validates metadata and
-relationships before writing.
+**Project tasks that live with your code.**
 
-## Install a release
+wrk is a local task tracker for developers and coding agents. Each ticket is a
+Markdown file in `.wrk/`, with a description, status, and relationships to other
+tickets. Manage work from the terminal or a local browser workspace, and commit
+your plans, decisions, and progress alongside the code they describe.
 
-Download a standalone binary from [GitHub Releases](https://github.com/calebmchenry/wrk/releases).
-Go is not required. macOS (`darwin`) and Linux are supported on `amd64` (Intel/x86-64)
-and `arm64` (Apple Silicon/AArch64). For example, to install v0.1.0 on Apple Silicon:
+No account, hosted service, or separate database is required. Ticket management
+works offline on macOS and Linux.
 
-```sh
-(
-set -eu
-wrk_download_dir="$(mktemp -d)"
-cd "$wrk_download_dir"
-curl -fLO https://github.com/calebmchenry/wrk/releases/download/v0.1.0/wrk_0.1.0_darwin_arm64.tar.gz
-curl -fLO https://github.com/calebmchenry/wrk/releases/download/v0.1.0/wrk_0.1.0_checksums.txt
-awk '$2 == "wrk_0.1.0_darwin_arm64.tar.gz"' wrk_0.1.0_checksums.txt > selected-checksum.txt
-test -s selected-checksum.txt
-shasum -a 256 -c selected-checksum.txt
-tar -xzf wrk_0.1.0_darwin_arm64.tar.gz
-mkdir -p "$HOME/.local/bin"
-install -m 755 wrk "$HOME/.local/bin/wrk"
-"$HOME/.local/bin/wrk" version
-)
-```
+[Get started](#quick-start) · [Install](#build-and-install) · [Browser workspace](#local-browser-workspace) · [Documentation](#documentation-and-help)
 
-Substitute the platform/architecture in both archive filenames and the checksum
-selection. On Linux, `sha256sum -c selected-checksum.txt` also works. Add
-`$HOME/.local/bin` to PATH. The checksum verifies the archive against the trusted
-GitHub release; it is not an independent cryptographic signature.
+## Why use wrk?
 
-```sh
-wrk version                    # also: wrk --version
-wrk upgrade --check            # inspect without writing files
-wrk upgrade                    # install a newer stable release
-wrk upgrade --check --json
-```
+wrk fits projects where the people and agents doing the work already share a
+repository and want the backlog to travel with it.
 
-These commands work outside a project and inside an invalid/newer-format project.
-Only `upgrade` contacts an external service. Checks exit 0 whether a newer version exists
-or not; failures exit 1 and invalid arguments exit 2. Upgrades never downgrade.
-An unknown/development version reports availability as unknown; development,
-snapshot, and `go run` builds must be installed manually. A binary predating the
-upgrade command needs one manual installation of an upgrade-capable release.
+- **Keep context with the code.** Tickets move through Git branches, commits, and
+  reviews with the implementation. Anyone with the checkout can read them.
+- **Pick up where you left off.** Record acceptance criteria, decisions, and
+  handoff notes in Markdown so the next person or agent can continue the work.
+- **See what can happen next.** Break work into parent/child tasks, express
+  prerequisites, and use `wrk list --ready` to find tasks whose dependencies are done.
+- **Use the interface that suits the work.** Browse and edit visually, use the CLI
+  from your terminal, or consume JSON in a script. They all use the same files.
 
-Self-upgrade supports user-owned standalone binaries in writable directories.
-It follows standalone symlinks and replaces their resolved target. Recognized
-package-manager paths receive guidance to use that manager. It never invokes
-sudo or chooses a different executable from PATH. `wrk update` still edits tickets.
-For connectivity, rate-limit, checksum, permission, and interrupted-upgrade
-troubleshooting, see the [upgrade contract](docs/cli.md#version-and-upgrade).
+wrk leaves commits and synchronization to your normal Git workflow. Its browser
+workspace runs on your own machine.
 
 ## Build and install
 
-Use Go 1.25 or newer on macOS or Linux. The verified development toolchain is
-Go 1.25.4 on arm64 for both platforms. From this repository:
+### Install a release
+
+Download the latest release from [GitHub Releases](https://github.com/calebmchenry/wrk/releases/latest).
+Standalone binaries are available for macOS and Linux on Intel/x86-64 and ARM64,
+with the CLI and browser workspace included. No Go installation is required.
+See the [installation guide](docs/install.md) for archive selection, checksum
+verification, and installation commands.
+
+Check for and install newer stable releases with:
 
 ```sh
-go run ./cmd/wrk --help
-go build -o ./bin/wrk ./cmd/wrk
-./bin/wrk validate
+wrk upgrade --check
+wrk upgrade
+```
+
+### Build from source
+
+If you prefer to build it yourself, use **Go 1.25 or newer** and Git:
+
+```sh
+git clone https://github.com/calebmchenry/wrk.git
+cd wrk
 go install ./cmd/wrk
-```
-
-`go install` writes to `GOBIN` when set, otherwise the `bin` directory in `GOPATH`
-(normally `$HOME/go/bin`). For the default destination, add this to your shell:
-
-```sh
 export PATH="$(go env GOPATH)/bin:$PATH"
-wrk --help
+wrk version
 ```
 
-If you set `GOBIN`, put that directory on PATH instead. The module name is `wrk`
-for local development; there is no published module or package-manager install.
-Dependency downloads are needed at build time. Normal CLI commands work offline.
+If you have set `GOBIN`, add that directory to PATH instead. Add the PATH setting
+to your shell configuration to keep it for future terminals. Once installed,
+`wrk` runs from any project directory; Go is only needed to build it.
 
-## Try the workflow
+Source builds are updated by bringing the checkout up to date and rerunning
+`go install ./cmd/wrk`.
 
-After installation, create a disposable project:
+## Quick start
+
+Try wrk in a disposable directory after installing it:
 
 ```sh
 wrk_demo_dir="$(mktemp -d)"
 cd "$wrk_demo_dir"
 wrk init
-wrk new "Try wrk" --priority high --label demo
+wrk new "Ship a getting-started guide" --priority high --label docs
 wrk list --ready
 ```
 
-`new` prints the ticket's ID and relative path. Substitute its ID for `<id>` below:
+`init` creates `.wrk/config.yaml`; `new` creates a ticket and prints its ID and
+file path. Copy that ID in place of `<id>` for the rest of the workflow:
 
 ```sh
 wrk show <id>
 wrk update <id> --status in-progress
-wrk update <id> --title "Tried wrk" --status done
+# Write the guide, verify it, and record the result in the ticket.
+wrk update <id> --status done
 wrk list --all
 wrk validate
 ```
 
-From another directory, select the existing project with `--project directory`
-or `--config directory/.wrk/config.yaml` on `new`, `list`, `show`, `update`,
-`validate`, and `serve`. Selectors work before or after the command:
+`list` shows active work. `list --ready` shows `todo` tickets with every dependency
+`done`; `list --all` includes completed and canceled work. Marking work `blocked`
+keeps it visible but excludes it from the ready list until you explicitly change
+its status.
+
+To use wrk in your own project, run `wrk init` from that project's root instead.
+Initialize each project once; an existing `.wrk/` directory is never overwritten.
+Commands also find the project from subdirectories, or you can select it explicitly:
 
 ```sh
-wrk --project '/path/to/my project' list --ready
-wrk show <id> --config '/path/to/my project/.wrk/config.yaml'
+wrk --project /path/to/your/project list --ready
 ```
 
-Explicit selection overrides cwd discovery and requires that exact project; it
-never searches ancestors or initializes missing data. Relative selectors and
-`--body-file` paths use the invocation directory. See the
-[project selection contract](docs/cli.md#project-selection) for path and symlink behavior.
+## Keep your work in Git
 
-Use `update --body-file path|-` to replace a description, optionally with metadata
-changes in the same operation. Empty input clears it; omitted input preserves it.
-Input must be UTF-8 and is read before locking. Repeating the existing body is a
-no-op. Body edits cannot use `--recursive`.
+Commit `.wrk/config.yaml` and `.wrk/*.md` with your project. Ticket descriptions
+are ordinary Markdown: use them for the outcome, acceptance criteria, decisions,
+and notes for whoever takes over next.
 
-Between CLI updates, you may also edit the Markdown body in `.wrk/<id>.md`
-directly. Everything through the closing `---` is metadata and must be changed
-through supported CLI commands. Metadata updates retain the body byte-for-byte,
-including whitespace and missing final newlines.
+You can edit the body of `.wrk/<id>.md` in your editor. Use `wrk new`, `wrk update`,
+or the browser for ticket metadata—the YAML frontmatter at the top of the file.
+Keep direct file edits and Git operations between CLI or browser saves.
+Run `wrk validate` after manual edits or merges to check tickets and relationships.
 
-```sh
-printf 'Description from stdin\n' | wrk new "Another task" --body-file - --no-labels
-printf 'Updated description\n' | wrk update <id> --body-file - --status in-progress
-wrk new "Task from a file" --body-file .wrk/config.yaml
-wrk list --json
+Add these runtime files to your project's `.gitignore`:
+
+```gitignore
+**/.wrk/.lock
+**/.wrk/.wrk-stage-*
+/.wrk-runs/
 ```
 
-Use `new --parent <id>` for children. Creation supports `--priority`, repeated
-`--label` (replaces configured labels), and `--no-labels`. Updates support
-`--title`, `--status`, `--priority`, repeated `--label` to replace the entire label
-list, `--no-labels` to clear it, and repeated `--add-label` / `--remove-label` for
-incremental edits. Parent/dependency and custom-field edits are supported too:
+See the [ticket format](docs/ticket-format.md) for an example ticket and
+[configuration](docs/configuration.md) to customize the ID prefix, default labels,
+and custom fields.
 
-```sh
-wrk update <id> --priority urgent --label backend --label cli
-wrk update <id> --no-labels
-wrk update <id> --priority normal --add-label reviewed --remove-label needs-triage
-wrk update <id> --parent <parent-id>
-wrk update <id> --no-parent --add-dependency <prerequisite-id>
-wrk update <id> --remove-dependency <prerequisite-id>
-wrk new "Related context" --related <id>
-wrk update <id> --add-related <other-id> --remove-related <old-id>
-wrk update <id> --no-related
-wrk new "Estimate work" --depends-on <prerequisite-id> --field 'estimate=3.5'
-wrk update <id> --field 'customer="123"' --field 'needs_review=true'
-wrk update <id> --remove-field estimate
-```
+## Organize a larger project
 
-Priority is `low`, `normal`, `high`, or `urgent`. Replacement/clearing conflicts
-with add/remove flags, and `--label` conflicts with `--no-labels`. Any one label
-mode can combine with other metadata changes in a single validated update.
-Replacement preserves supplied order and duplicates in source; JSON summaries
-sort labels. Unchanged values are no-ops, including clearing absent labels or
-setting an omitted priority to its effective value `normal`. Creation defaults
-never change existing tickets or influence updates.
+Once you have tickets, use their IDs to connect and filter the work. Replace the
+placeholder IDs below with IDs from `wrk list` or `wrk new`.
 
-Parent set/clear flags conflict. Dependency add/remove flags are repeatable and
-idempotent, but adding and removing the same ID conflicts. Creation accepts
-repeated `--depends-on` and rejects duplicate edges. Relationships must reference
-existing tickets and cannot form cycles within either graph.
+| When you want to… | Command |
+| --- | --- |
+| Break a task into smaller pieces | `wrk new "Write the examples" --parent <parent-id>` |
+| Wait for a prerequisite | `wrk new "Publish the guide" --depends-on <draft-id>` |
+| Add a task to a batch | `wrk update <id> --add-label launch` |
+| Find ready work in that batch | `wrk list --ready --label launch` |
+| Find ready descendants of a task | `wrk list --ready --under <parent-id>` |
+| Record a blocker | `wrk update <id> --status blocked` |
+| Resume a blocked task | `wrk update <id> --status todo` |
+| Link useful context | `wrk update <id> --add-related <other-id>` |
 
-Related links provide context, display at both endpoints, and allow cycles without
-changing readiness. Add/remove works from either endpoint; `--no-related` clears
-all incoming and outgoing links. Reverse adds and repeated removals are no-ops.
-Reverse removals can update several files and report each publication state;
-inspect partial failures before retrying. Upgrade all clients before first use of
-the optional version-1 `related` field; older clients reject it. See
-[related-link semantics](docs/cli.md#related-item-updates).
+Parents group work; dependencies determine readiness; related links provide
+context. Completing a child does not automatically complete its parent.
+For blocked work, record the reason and what will unblock it in the description.
 
-Repeated `--field 'name=YAML'` sets typed custom values on creation or update;
-`--remove-field name` removes them. Shell quotes preserve the argument, while
-inner YAML quotes select strings such as `"123"` or `"true"`. Values retain YAML
-tags, nested collections, aliases, and exact numeric precision. Configured types
-are checked without coercion. Repeated assignments or setting/removing the same
-field conflict. Removing absent fields and setting identical values are no-ops.
-See [relationship edits](docs/cli.md#relationship-updates) and
-[custom-field input](docs/cli.md#custom-field-input-and-updates) for full semantics.
-
-Bare `wrk` prints help. Flags may come before or after positional arguments;
-`--flag=value` and `--` are supported. Every command supports `--json`, including
-errors. See [the CLI contract](docs/cli.md) for output schemas and exit codes.
-
-## Scoped agent work sessions
-
-Select an arbitrary batch with labels, or list a deliverable's descendants:
-
-```sh
-wrk update <id> --add-label burn-tonight --remove-label needs-triage
-wrk update <parent-id> --add-label burn-tonight --recursive
-wrk list --label burn-tonight
-wrk list --ready --label burn-tonight
-wrk list --ready --under <parent-id>
-wrk update <id> --status blocked
-wrk update <id> --status todo
-```
-
-Add/remove flags repeat and preserve unrelated labels; adding an existing label
-or removing an absent one is a no-op. Adding and removing the same label conflicts.
-Recursive updates permit labels only and include the root plus all descendants,
-even done/canceled tickets. Replacement (`--label`) and clearing (`--no-labels`)
-also work recursively and affect each target's entire label list; use add/remove
-to preserve unrelated labels. Title, status, and priority cannot be recursive. Labels are a snapshot, not inheritance: supply
-`new --parent <id> --label burn-tonight` for later subtasks. `list --under` excludes
-the root. Repeated label filters require **all** labels; label, descendant, and
-status filters intersect. Dependencies outside the scope still affect readiness.
-
-An agent should read scope instructions and durable notes, resume eligible
-in-progress work, then pick a ready ticket, mark it in-progress, implement and
-verify it, record results, and mark it done. When work needs external input, record
-the reason, unblocking condition, and resume notes in its body, mark it blocked,
-and continue with other eligible work. Blocked stays visible in active lists and
-never becomes ready automatically; unblock explicitly. Only done satisfies a
-dependency. Status changes never cascade.
-
-Agree on scope, permissions, required verification, and stopping limits before a
-session. Stop when the batch is complete or nothing can proceed, and report
-unfinished work and blockers. An empty ready list alone does **not** mean complete:
-inspect in-progress/blocked work, unmet dependencies, and the root separately.
-Keep handoffs in ticket bodies. Follow the [full agent burn loop](docs/burns.md)
-for safe resumption and stop rules. The generic
-[`wrk run` command](docs/cli.md#scoped-command-execution) can execute a supplied
-action over a query, with an optional persisted-status check and explicit one-ticket
-retries. Runs save full child output and lifecycle records under `.wrk-runs/`
-(add `/.wrk-runs/` to your project's `.gitignore`). Use `--log-dir` to choose a
-location, `--verbose` for live child output on stderr, and `--json` for lifecycle
-NDJSON. See [run output and logs](docs/cli.md#run-output-and-logs) for heartbeat,
-waiting, and failure details. There is no built-in AI provider or scheduler.
-
-For a Codex burn, run this from the checkout root:
-
-```sh
-go run ./cmd/wrk run --ready --label web --expect-status done -- \
-  codex exec --dangerously-bypass-approvals-and-sandbox 'Implement {id}'
-```
-
-It starts one fresh full-access Codex call per ticket with exactly `Implement <id>`,
-verifies persisted done status, and selects again. Add `--max-tickets 1` for a trial,
-`--under <parent-id>` or more labels to narrow the scope, and explicit `--stream`
-to wait for previously unprocessed eligible work. Ordinary runs drain and exit.
-Successful IDs are skipped for the invocation; a fresh run may revisit them.
-After inspecting a failure, use `--ticket <id>` to restart the whole action even
-if the ticket is in-progress. There are no automatic retries or worker claims.
-The optional `python3 scripts/ticket-burn.py --ready --label web` is a thin wrapper
-around the same command. See [burn usage, migration, and recovery](docs/burns.md#minimal-codex-runner)
-for retired flags, path/environment behavior, and multi-step scripts.
-
-Recursive labeling publishes one file at a time under one writer lock. On a
-partial failure, output identifies committed, unchanged, and pending tickets.
-Inspect the entire scope and resolve the error before retrying the same idempotent
-operation; retries use a fresh descendant snapshot. See
-[recursive publication and recovery](docs/storage.md#recursive-label-publication).
-
-## Safe local use
-
-The nearest `.wrk` entry is the project boundary, even if invalid. `init` requires
-an existing target directory and refuses any existing `.wrk` entry. Any invalid
-ticket makes ordinary data commands fail; use read-only `wrk validate` for sorted,
-actionable diagnostics. Existing version-1 tickets need no migration. Older
-clients reject `blocked` status and may refuse all data commands once it appears; upgrade all clients
-before using it.
-
-CLI writers use a persistent advisory lock and check all validation inputs for
-changes before atomic publication. **Do direct body/config edits and Git operations
-outside CLI mutations.** A non-cooperating editor can still save between the final
-comparison and replacement; that race is not protected. If an error reports
-`publication: "committed"`, inspect the affected ticket before retrying.
-
-Ignore `**/.wrk/.lock` and `**/.wrk/.wrk-stage-*` in other projects' `.gitignore`.
-These runtime files are ignored by ticket scanning. See [storage and recovery](docs/storage.md)
-for filesystem support, concurrency limits, permissions, and interruption handling.
+See the [CLI reference](docs/cli.md) for priorities, custom fields, recursive
+labeling, and all command options.
 
 ## Local browser workspace
 
+From an initialized project, run:
+
 ```sh
-wrk serve                         # 127.0.0.1:7331
-wrk serve --port 0 --open          # allocate a port and open the browser
-wrk serve --project '/path/to/project'
+wrk serve --open
 ```
 
-The server prints the selected absolute project path and usable local URL.
-It serves one existing project and embeds all browser assets in the executable.
-Browse a searchable list and item detail pane with Markdown descriptions,
-statuses, priority, labels, hierarchy, dependencies, and custom values. Search
-uses case-insensitive ordered characters from titles only. Active, All, Ready,
-and manually Blocked views intersect with exact Tag filters and descendant-only
-Under scope. Collapsible parent/child rows retain matching ancestors as muted
-context; explicit filtering reveals matching paths without losing collapse choices. Selection and filters
-survive links and browser navigation. CLI/agent changes appear automatically
-through polling, normally within two seconds. Connection and validation failures
-mark retained data as stale and recover automatically. **Reload project** forces
-an immediate refresh. **New** opens a title-only creation modal with optional
-description, tags and parent. A row's **Add child** action supports repeated
-title-only entry. Edit titles and descriptions in the detail pane with explicit
-Save/Cancel; status, tags, parent, dependencies and related links save immediately.
-Browser **Tags** are CLI labels, with no storage rename. Drafts survive live updates;
-stale saves require explicit review, and priority/custom fields remain preserved.
-See [editing and save recovery](docs/browser.md#creating-and-editing).
+The workspace opens at `http://127.0.0.1:7331`. Keep the command running while you
+work; Ctrl-C stops it. If that port is in use, `wrk serve --port 0 --open` chooses
+an available one and opens the printed URL.
 
-Under excludes its root, matching CLI `list --under`; the root can appear as
-context without counting as a match. Existing `focus` links adopt Under semantics
-while retaining selection. Markdown images appear as
-text placeholders, raw HTML is disabled, and arbitrary local files are not
-served. See [browser behavior and verification](docs/browser.md).
+Search titles, filter by status or tags, expand parent/child tasks, and open a
+ticket to read its description. Create tasks, add children, and edit titles,
+descriptions, status, tags, dependencies, and related links. Browser tags are the
+same as CLI labels.
 
-CLI/agent edits can continue while it runs. Port conflicts fail without switching;
-`--open` is optional and a browser-launch failure leaves the URL usable. Ctrl-C
-stops the server. `serve --json` emits newline-delimited startup/warning/shutdown
-events. See the [server and API contract](docs/cli.md#local-server) for limits,
-same-origin protections, output details, and recovery.
+Changes from another terminal or an agent appear automatically, normally within
+two seconds. If a ticket changes while you are editing it, the workspace keeps
+your draft and asks you to review the current version before saving over it.
+The UI is bundled in the executable; there is no separate frontend install.
 
-Keep `serve` running in the foreground while a separate terminal or agent uses
-the CLI. It is a local workspace: it does not start agents, run a background
-service, synchronize Git, or commit changes. Direct body/config edits and Git
-operations must happen between both CLI and browser saves. For a reproducible
-two-terminal walkthrough, see [browser and agent workflow](docs/browser.md#browser-and-agent-walkthrough).
-See the [compact workflow acceptance record](docs/compact-workspace-verification.md)
-for current browser/CLI evidence and the [original workspace verification record](docs/workspace-verification.md)
-for packaged runtime checks and their limits.
+See the [browser walkthrough](docs/browser.md#browser-and-agent-walkthrough) for
+working in the browser and CLI together.
+
+## Work with agents and scripts
+
+An agent that can run shell commands and read project files can use wrk. Give it
+a ticket or a scope, and keep its findings in ticket descriptions so future
+sessions have the context they need. A useful instruction for your project's
+agent guidance is:
+
+> Use wrk to track work. Read the ticket with `wrk show <id>`, mark it
+> `in-progress`, implement and verify the change, and record decisions and results
+> in its body. Mark it `done` when its acceptance criteria are met. If blocked,
+> record why and set `blocked`. Run `wrk validate` before handing off.
+
+For scripts, commands support `--json`:
+
+```sh
+wrk list --ready --label docs --json
+```
+
+`wrk run` applies a command to matching tickets one at a time, substituting each
+ID for `{id}`. For example, inspect every ready documentation task:
+
+```sh
+wrk run --ready --label docs --verbose -- wrk show '{id}'
+```
+
+`--verbose` displays the command's output as it runs. Supply your own script or
+agent command to do the work. Add `--expect-status done`
+to require that the command leaves each ticket completed, or `--max-tickets 1`
+to try one ticket first. Runs save output in `.wrk-runs/` and stop on failure;
+retries are explicit. wrk does not include an AI provider.
+
+Read the [runner reference](docs/cli.md#scoped-command-execution) and
+[agent work-session guide](docs/burns.md) for scope selection, waiting for new work,
+completion checks, and recovery.
+
+## Documentation and help
+
+- [CLI reference](docs/cli.md): commands, filters, JSON output, and troubleshooting.
+- [Browser guide](docs/browser.md): navigation, editing, and handling conflicts.
+- [Installation](docs/install.md): binaries, checksums, source builds, and upgrades.
+- [Ticket format](docs/ticket-format.md) and [configuration](docs/configuration.md):
+  how your work is stored and customized.
+- [Agent work sessions](docs/burns.md): scoped execution and durable handoffs.
+- [Full documentation index](docs/index.md): workflow, storage, and development details.
+
+Run `wrk --help` for command syntax. For bugs, questions, or feature requests,
+[open an issue](https://github.com/calebmchenry/wrk/issues). Include the command,
+expected behavior, actual output, and `wrk version` when reporting a bug.
 
 ## Developing wrk with wrk
 
-Use wrk for this repository's own work. Follow the [daily workflow](docs/index.md#daily-workflow)
-to find or create a ticket, mark it in progress, record results in its body, and
-complete it through the CLI. Run the current checkout from the repository root:
-
-```sh
-go run ./cmd/wrk validate
-go run ./cmd/wrk list
-```
-
-No initialization is needed here: the backlog already lives in [`.wrk/`](.wrk/).
-Prefer `go run ./cmd/wrk` over an installed binary that may be stale, or rebuild
-`./bin/wrk` after CLI changes. Read the [ticket editing contract](docs/ticket-format.md#editing-contract)
-before editing tickets.
-
-For code changes, run the development checks:
-
-```sh
-gofmt -l cmd internal test
-go test -count=1 ./...
-go test -race -count=1 ./...
-go vet ./...
-go build -o ./bin/wrk ./cmd/wrk
-python3 -B -m unittest discover -s scripts -p 'test_ticket_burn.py' -v
-node --test internal/web/model.test.mjs
-```
-
-Formatting must report no files. Use `-count=1` so the integration package reruns
-its compiled CLI: it builds the binary in `TestMain`, and Go's test cache does not
-track that runtime build as a source dependency. Run the checks on both macOS and
-Linux local filesystems; cross-compilation alone does not exercise storage.
-Tests use disposable projects and retain the
-immutable original data in `testdata/compat/.wrk/`. [Sprint 001 evidence](docs/sprints/SPRINT-001-EXECUTION.md)
-records macOS/Linux verification and clean-source build/install runs.
-
-For browser changes, also run `npm ci`, `npx playwright install chromium`, and
-`npm run test:browser`. These are development dependencies only; the executable
-embeds the complete UI. See [browser checks](docs/browser.md#verification).
-Run `python3 scripts/verify-workspace.py ./bin/wrk` after building to verify the
-embedded module graph and API/CLI persistence outside the source tree with an
-empty executable PATH. Run browser timing checks after CPU-heavy builds finish.
-After packaging, `python3 scripts/verify-release.py dist` also starts the extracted
-native executable away from the checkout, checks every embedded UI module, and
-exercises API/CLI writes with no tools on the executable's PATH.
+Contributions are welcome. This repository tracks its own work in [`.wrk/`](.wrk/).
+Follow the [daily workflow](docs/index.md#daily-workflow) and use
+`go run ./cmd/wrk` from the repository root to exercise the current checkout.
+See the [development guide](docs/development.md) for setup, required checks,
+browser tests, and packaging verification.
