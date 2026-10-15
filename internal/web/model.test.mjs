@@ -95,11 +95,56 @@ test('10,000-deep hierarchy traversal, ancestor closure and collapse are iterati
   const chain = indexItems(Array.from({ length: 10000 }, (_, n) => item(String(n), 'todo', { parent: n ? String(n - 1) : null })));
   assert.equal(selectItems(chain, { ...readState(''), under: '0' }).length, 9999);
   const result = tree({ q: '9999' }, new Set(['0']), chain);
-  assert.equal(result.rows.length, 10000);
+  assert.equal(result.rows.length, 5);
   assert.equal(result.matches.length, 1);
-  assert.equal(result.rows.at(-1).depth, 9999);
+  assert.equal(result.rows.at(-1).kind, 'more');
+  assert.equal(result.rows.at(-1).depth, 4);
+  assert.equal(result.rows.at(-1).descendants, 9996);
+  assert.equal(result.rows.at(-1).matches, 1);
+  assert.equal(result.hiddenByDepth.get('9999'), '3');
+  assert.equal(result.hiddenByCollapse.size, 0);
   assert.equal(tree({}, new Set(['0']), chain).rows.length, 1);
-  assert.equal(tree({ under: '9900' }, new Set(['0']), chain).rows.length, 100);
+  assert.equal(tree({ under: '9900' }, new Set(['0']), chain).rows.length, 5);
+  assert.equal(tree({ under: '9996' }, new Set(['0']), chain).rows.length, 4);
+});
+
+test('four levels retain recursive branches, honest depth/collapse counts and filtered connectors', () => {
+  const source = indexItems([
+    item('root', 'done'), item('a', 'todo', { parent: 'root' }), item('b', 'todo', { parent: 'root' }),
+    item('aa', 'todo', { parent: 'a' }), item('ab', 'todo', { parent: 'a' }),
+    item('aaa', 'todo', { parent: 'aa' }), item('aaaa', 'done', { parent: 'aaa' }),
+    item('aaaaa', 'todo', { parent: 'aaaa', labels: ['deep'] }), item('aaab', 'todo', { parent: 'aaa' }),
+    item('ba', 'todo', { parent: 'b' }),
+  ]);
+  const result = tree({}, new Set(['b']), source);
+  assert.deepEqual(result.rows.map(r => [r.kind || 'item', r.item.id]), [
+    ['item', 'root'], ['item', 'a'], ['item', 'aa'], ['item', 'aaa'], ['more', 'aaa'], ['item', 'ab'], ['item', 'b'],
+  ]);
+  assert.deepEqual(result.rows.map(r => r.guides), [[], [true], [true, true], [true, true, false], [true, true, false, false], [true, false], [false]]);
+  assert.equal(result.matches.length, 8);
+  assert.deepEqual([...result.hiddenByCollapse], ['ba']);
+  assert.equal(result.rows[4].matches, 2);
+  assert.equal(result.rows[4].descendants, 3); // Includes the closed context ancestor.
+  const scoped = tree({ under: 'aaa' }, new Set(['b']), source);
+  assert.deepEqual(rowIDs(scoped), ['aaa', 'aaaa', 'aaaaa', 'aaab']);
+  assert.deepEqual(scoped.rows.map(r => r.depth), [0, 1, 2, 1]);
+  assert.equal(scoped.matches.length, 2);
+  assert.equal(scoped.hiddenByDepth.size, 0);
+  const filtered = tree({ labels: ['deep'] }, new Set(['root']), source);
+  assert.deepEqual(filtered.rows.map(r => r.guides), [[], [false], [false, false], [false, false, false], [false, false, false, false]]);
+  assert.equal(filtered.rows.at(-1).matches, 1);
+  assert.equal(tree({}, new Set(['aaa']), source).rows.some(r => r.kind === 'more'), false);
+});
+
+test('inline creation pins retain deep parents and saved children without changing match counts', () => {
+  const source = indexItems(Array.from({ length: 9 }, (_, n) => item(String(n), 'todo', { parent: n ? String(n - 1) : null })));
+  const result = treeRows(source, { ...readState(''), q: 'absent' }, new Set(['0']), ['6', '7'], ['6']);
+  assert.ok(result.visible.has('6'));
+  assert.ok(result.visible.has('7'));
+  assert.equal(result.matches.length, 0);
+  assert.equal(result.rows[6].depth, 6);
+  assert.ok(result.rows.every(row => row.guides.length <= 4));
+  assert.deepEqual(rowIDs(tree({ q: 'absent' }, new Set(['0']), source)), []);
 });
 
 // Manually clock the poller and settle individual reads: no race-prone sleeps.

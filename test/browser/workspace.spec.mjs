@@ -868,7 +868,7 @@ test('compact rows keep titles primary and expose full values with usable copy a
     expect(await page.locator('#list-scroll').evaluate(node => node.getBoundingClientRect().top)).toBeLessThan(140);
     expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight)).toBe(true);
     const row = page.locator(`[data-row="${id(9)}"]`);
-    expect((await row.boundingBox()).height).toBe(40);
+    expect((await row.boundingBox()).height).toBe(44);
     await expect(row.locator('.row-tags .badge')).toHaveCount(3);
     await expect(row.locator('.tag-overflow')).toHaveText('+3');
     await expect(listLink(page, 9)).toHaveAttribute('title', title);
@@ -896,7 +896,7 @@ test('compact rows keep titles primary and expose full values with usable copy a
     await expectTitle(page, title);
     await expect(page.locator('#detail')).toBeFocused();
     expect(await page.locator('#browse').evaluate(node => node.clientWidth)).toBeGreaterThan(700);
-    expect((await row.boundingBox()).height).toBe(40);
+    expect((await row.boundingBox()).height).toBe(44);
     await page.locator('#detail').getByRole('button', { name: 'Copy link', exact: true }).click();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(page.url());
     await page.screenshot({ path: testInfo.outputPath('compact-detail.png'), fullPage: true });
@@ -1521,6 +1521,73 @@ test('legacy focus preserves selection, migrates links to Under and clears missi
   await expect(listLink(page, 2)).toBeVisible();
 });
 
+test('recursive branches show four levels, scope deeper links and preserve filters, selection and history', async ({ page }, testInfo) => {
+  const originals = await Promise.all([9, 10, 11, 12].map(n => readFile(ticketPath(n))));
+  try {
+    await ticket(9, 'Branch boundary', 'todo', `parent: ${id(4)}\nlabels: [web]\n`);
+    await ticket(10, 'Child below boundary', 'todo', `parent: ${id(9)}\nlabels: [web]\n`);
+    await ticket(11, 'Deep leaf', 'todo', `parent: ${id(10)}\nlabels: [web]\n`);
+    await ticket(12, 'Sibling boundary', 'todo', `parent: ${id(4)}\nlabels: [web]\n`);
+    await ready(page, '#view=all');
+    const more = page.locator(`[data-more="${id(9)}"] a`);
+    await expect(more).toHaveText('See more · 2 matching items');
+    await expect(listLink(page, 10)).toHaveCount(0);
+    await expect(listLink(page, 11)).toHaveCount(0);
+    await expect(listLink(page, 12)).toBeVisible();
+    await expect(page.locator('#results')).toHaveText('40 of 40 items match · 2 in deeper branches');
+    const row = page.locator(`[data-row="${id(2)}"]`);
+    const titleBox = await row.locator('.row-title').boundingBox();
+    const statusBox = await row.locator('.row-status').boundingBox();
+    const tagsBox = await row.locator('.row-tags').boundingBox();
+    expect(titleBox.x + titleBox.width).toBeLessThan(statusBox.x);
+    expect(statusBox.x + statusBox.width).toBeLessThan(tagsBox.x);
+    expect((await listLink(page, 2).boundingBox()).x - (await listLink(page, 1).boundingBox()).x).toBe(24);
+    await expect(row.locator('.tree-guides')).toHaveAttribute('aria-hidden', 'true');
+    await page.screenshot({ path: testInfo.outputPath('recursive-tree-desktop.png'), fullPage: true });
+    await toggleRow(page, 9).click();
+    await expect(more).toHaveCount(0);
+    await expect(page.locator('#results')).toHaveText('40 of 40 items match · 2 hidden by collapse');
+    await toggleRow(page, 9).click();
+    await more.focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`view=all&under=${id(9)}$`));
+    await expect(listLink(page, 9)).toBeFocused();
+    await expect(listLink(page, 11)).toBeVisible();
+    await expect(page.locator('#results')).toHaveText('2 of 40 items match');
+    await page.goBack();
+    await expect(more).toBeVisible();
+    // A draft at the boundary and its newly created siblings must stay reachable.
+    await addChild(page, 9);
+    await expect(inlineForm(page)).toBeVisible();
+    await expect(listLink(page, 10)).toBeVisible();
+    await inlineForm(page).getByLabel('Title', { exact: true }).press('Escape');
+    await expect(more).toBeVisible();
+    await page.goto(base + `#q=leaf&view=all&label=web&item=${id(11)}`);
+    await expectTitle(page, 'Deep leaf');
+    await expect(page.locator('#selection-context')).toContainText('in a deeper branch');
+    await expect(more).toHaveText('See more · 1 matching item');
+    await expect(more).toHaveAttribute('href', `#q=leaf&view=all&label=web&under=${id(9)}&item=${id(11)}`);
+    await more.click();
+    await expectTitle(page, 'Deep leaf');
+    await expect(listLink(page, 11)).toBeVisible();
+    await expect(page.locator('#selection-context')).toBeHidden();
+    await page.reload();
+    await expect(listLink(page, 11)).toBeVisible();
+    await page.goBack();
+    await expect(more).toBeVisible();
+    await page.goForward();
+    await expect(listLink(page, 11)).toBeVisible();
+    cli('update', id(11), '--parent', id(12));
+    await expect(page.locator('#empty')).toContainText('No matching items', { timeout: 2000 });
+    await page.getByRole('button', { name: 'Clear Under filter' }).click();
+    const moved = page.locator(`[data-more="${id(12)}"] a`);
+    await expect(moved).toHaveText('See more · 1 matching item');
+    await moved.click();
+    await expect(listLink(page, 11)).toBeVisible();
+    await expect(page.getByRole('searchbox')).toHaveValue('leaf');
+  } finally { await Promise.all([9, 10, 11, 12].map((n, i) => writeFile(ticketPath(n), originals[i]))); }
+});
+
 test('deep rendered hierarchy bounds indentation and toolbar pickers on narrow screens', async ({ page }, testInfo) => {
   await page.route('**/api/workspace', async route => {
     const response = await route.fetch();
@@ -1533,18 +1600,20 @@ test('deep rendered hierarchy bounds indentation and toolbar pickers on narrow s
     await route.fulfill({ response, json: data });
   });
   await page.goto(base);
-  await expect(page.locator('#items > li')).toHaveCount(120);
-  const leaf = page.locator(`[data-row="${id(1119)}"]`);
-  await expect(leaf).toHaveAttribute('data-depth', '119');
-  expect(await leaf.evaluate(node => node.style.getPropertyValue('--depth'))).toBe('6');
+  await expect(page.locator('#items > li')).toHaveCount(5);
+  const boundary = page.locator(`[data-row="${id(1003)}"]`);
+  const more = page.locator(`[data-more="${id(1003)}"] a`);
+  await expect(boundary).toHaveAttribute('data-depth', '3');
+  await expect(more).toContainText('116 matching items');
   await page.locator(`[data-toggle="${id(1000)}"]`).click();
   await expect(page.locator('#items > li')).toHaveCount(1);
   await page.getByRole('searchbox').fill('NDLLF');
-  await expect(page.locator('#items > li')).toHaveCount(120);
-  await expect(page.locator('#results')).toHaveText('1 of 120 items match');
+  await expect(page.locator('#items > li')).toHaveCount(5);
+  await expect(page.locator('#results')).toHaveText('1 of 120 items match · 1 in deeper branches');
+  await expect(more).toContainText('1 matching item');
   for (const width of [320, 390, 760]) {
     await page.setViewportSize({ width, height: 844 });
-    await leaf.scrollIntoViewIfNeeded();
+    await more.scrollIntoViewIfNeeded();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(await page.locator('#list-scroll').evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
     await expect(page.getByRole('searchbox')).toBeVisible();

@@ -13,7 +13,7 @@ Use this project's own CLI to track work in [`.wrk/`](../.wrk/). Follow the [dai
 - [Local server, read APIs, lifecycle output, and resource limits](cli.md#local-server)
 - [Compact workspace layout](browser.md#compact-workspace-layout)
 - [Browser filters, navigation, Markdown policy, and browser verification](browser.md)
-- [Hierarchical rows, expansion, counts, and legacy focus links](browser.md#hierarchy-and-expansion)
+- [Tree guides, four-level rows, See more scopes, expansion and counts](browser.md#hierarchy-and-expansion)
 - [Inline child context/insertion hook](browser.md#hierarchy-implementation-handoff)
 - [Creation modal, reusable pickers, editing, conflicts, and save recovery](browser.md#creating-and-editing)
 - [Row status changes and repeated inline child creation](browser.md#row-status-and-repeated-child-creation)

@@ -54,7 +54,7 @@ scrolling table. **Tags** maps to stored labels and CLI `--label`. The Under pic
 searches titles and IDs across all items, including closed parents; its × clears
 that scope. Search typing and live refresh retain picker input and keyboard focus.
 
-Rows stay on one line with status, title, up to two tag chips and a +N count,
+Rows stay on one line with title, status, up to two tag chips and a +N count,
 muted ID, and an actions button. Secondary content disappears as the table
 narrows; the full title is the native item link, with ID/status/tags/priority,
 blockers, and child progress available in its accessible description. The row
@@ -107,7 +107,8 @@ ID. Each item appears once. Nonmatching ancestors (including done/canceled paren
 are muted, marked **context**, and described accessibly as not matching the filters.
 They only appear when needed to explain actual matches. Counts exclude context;
 matching descendants hidden by collapse remain in the match count and have a
-separate “hidden by collapse” count. No matches or a missing Under root shows an
+separate “hidden by collapse” count. Matches beyond the visible depth limit are
+counted separately as “in deeper branches.” No matches or a missing Under root shows an
 explicit Clear filters recovery action.
 
 Branches start expanded. Their native chevron buttons support Tab and Enter/Space,
@@ -117,13 +118,22 @@ matching paths. Required chevrons are disabled during this exploration and expla
 why in their tooltip. Clearing exploration restores the previous manual choices.
 Manual choices survive live updates and are stored per browser history entry,
 including reload, alongside pane scroll. They are not included in copied URLs.
-Traversal and ancestor closure are iterative, including the 10,000-level fixture;
-visual indentation stops growing after six levels (48 pixels), with actual depth
-retained in the row's accessible description.
+Traversal and ancestor closure are iterative, including the 10,000-level fixture.
+Each scope shows four item levels (its root plus three nested levels). Expanded
+fourth-level parents with deeper included descendants get a **See more** row with
+the number of deeper matching items. This native link sets **Under** to that parent,
+preserving search, tags, view and selection; Back/Forward and copied URLs retain
+the scope. Repeated See more links reach any depth. Filtering reveals matching
+paths up to the same limit, so a deep search result is never silently omitted.
+Rows are 44 pixels tall, with 24 pixels of indentation per level (16 in narrow
+tables). Tree lines distinguish continuing siblings from the last child and adapt
+to filters and collapse. Decorative guides are hidden from assistive technology;
+actual hierarchy level remains in the item link's accessible description.
 
 Selection does not force a branch open or alter filters. When collapse hides the
 selected row, its detail stays visible with a compact explanation; out-of-filter
-selection has a distinct explanation. Close/back focuses the row if displayed,
+selection has a distinct explanation. Selection below the depth limit explains the
+deeper branch and offers a link to scope under its visible ancestor. Close/back focuses the row if displayed,
 otherwise the title-search input. **Show descendants** in details sets Under to
 that item without changing selection.
 
@@ -277,6 +287,9 @@ never inherited, and no description is required.
 
 The session pins its parent, ancestors, and confirmed children across filters,
 manual collapse, navigation, and live updates without changing counts or filters.
+Pinned paths may temporarily exceed the four-level limit to keep the draft and
+saved children reachable, including after live reparenting; their visual indentation
+stays bounded. Exiting the session restores the ordinary depth limit.
 Saved children outside filters are marked **created · outside filters** (**new***
 in narrow tables). Reparented children stay visible in their current hierarchy;
 the next draft still uses the original parent ID. Live parent reparenting moves
@@ -566,8 +579,11 @@ identify the insertion context; the mount itself is not a result.
 Hierarchy checks cover filter intersections, global readiness (including canceled
 prerequisites), subsequence fixtures, context/counts, collapse/history restoration,
 live closed-parent/reparent/status changes, legacy focus links and missing-scope
-recovery. The browser uses a synthetic 120-level read response to verify indentation
+recovery. The browser uses a synthetic 120-level read response to verify depth continuation
 and narrow bounds; dependency-free model checks exercise the 10,000-level chain.
+Real nested fixtures verify four visible levels, sibling branch guides, status
+placement, continuation counts and native URLs, keyboard scope navigation,
+Back/Forward/reload, selected deep items and live reparenting.
 The inline hook test checks mount/input retention. Full creation scenarios verify
 repeated siblings through CLI reads, defaults without filter/parent inheritance,
 collapsed and filtered parents, live reparenting/status/deletion, explicit cancel,

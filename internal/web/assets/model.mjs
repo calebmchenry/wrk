@@ -71,6 +71,7 @@ export function selectItems(index, state) {
 export function exploring(state) {
   return Boolean(state.q.trim() || state.labels.length || state.under || ['ready', 'blocked'].includes(state.view));
 }
+export const visibleTreeLevels = 4;
 // Linear passes, including ancestor closure: a deep chain never recurses or walks
 // every ancestor once per match. Pins are reserved for the inline-creation session;
 // they reveal context without changing membership or the user's collapse choices.
@@ -94,20 +95,49 @@ export function treeRows(index, state, collapsed = new Set(), pins = [], expande
     if (explore || pinned.has(item.id)) forced.add(parent);
     if (pinned.has(item.id)) pinned.add(parent);
   }
-  const rows = [], visible = new Set();
+  const rows = [], visible = new Set(), hiddenByDepth = new Map(), hiddenByCollapse = new Set();
   let hiddenBelow = Infinity;
+  let continuation = null;
   let rootDepth = 0;
   for (const { item, depth } of index.order) {
-    if (depth <= hiddenBelow) hiddenBelow = Infinity;
-    if (depth > hiddenBelow || !included.has(item.id)) continue;
+    if (depth <= hiddenBelow) { hiddenBelow = Infinity; continuation = null; }
+    if (!included.has(item.id)) continue;
+    if (depth > hiddenBelow) {
+      if (continuation) {
+        continuation.descendants++;
+        hiddenByDepth.set(item.id, continuation.item.id);
+        if (matching.has(item.id)) continuation.matches++;
+      } else if (matching.has(item.id)) hiddenByCollapse.add(item.id);
+      continue;
+    }
     if (!item.parent || !included.has(item.parent)) rootDepth = depth;
     const expanded = hasChildren.has(item.id) && (forced.has(item.id) || !collapsed.has(item.id));
     rows.push({ item, depth: depth - rootDepth, context: !matching.has(item.id),
       hasChildren: hasChildren.has(item.id), expanded, forced: forced.has(item.id) });
     visible.add(item.id);
     if (!expanded) hiddenBelow = depth;
+    // A live inline draft must keep its pinned path visible after reparenting.
+    // Ordinary branches always stop at four item levels within the current scope.
+    else if (depth - rootDepth >= visibleTreeLevels - 1 && !pinned.has(item.id)) {
+      continuation = { kind: 'more', item, depth: depth - rootDepth + 1, descendants: 0, matches: 0 };
+      rows.push(continuation);
+      hiddenBelow = depth;
+    }
   }
-  return { rows, matches, matching, visible };
+  // Derive connector segments from rendered siblings, so filtering, collapse and
+  // scope changes cannot leave dangling lines. Only the last sibling gets an elbow.
+  const lastChild = new Map();
+  for (const row of rows) lastChild.set(row.kind === 'more' ? row.item.id : row.item.parent, row);
+  const path = [];
+  for (const row of rows) {
+    row.last = lastChild.get(row.kind === 'more' ? row.item.id : row.item.parent) === row;
+    const guideLimit = row.kind === 'more' ? visibleTreeLevels : visibleTreeLevels - 1;
+    row.guides = path.slice(1, Math.min(row.depth, guideLimit)).map(ancestor => !ancestor.last);
+    if (row.depth) row.guides.push(!row.last);
+    path[row.depth] = row;
+    path.length = row.depth + 1;
+  }
+  return { rows, matches, matching, visible, hiddenByDepth, hiddenByCollapse };
 }
 export function progress(children) {
   return `${children.filter(item => item.status === 'done').length}/${children.length} children done`;

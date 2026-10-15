@@ -1,4 +1,4 @@
-import { readState, stateHash, filterKey, indexItems, selectItems, treeRows, progress } from './model.mjs';
+import { readState, stateHash, filterKey, indexItems, selectItems, treeRows, visibleTreeLevels, progress } from './model.mjs';
 import { createPoller, drafts } from './live.mjs';
 import { createEditor } from './editor.mjs';
 import { createDetailEditor } from './detail.mjs';
@@ -23,6 +23,7 @@ let detailFocus = false;
 let detailScroll = history.state?.detailScroll || 0;
 let renderedDetail = '';
 let renderedList = '';
+let renderedSelectionContext = '';
 let noticeTimer;
 let copyTimer;
 let collapsed = new Set(history.state?.collapsed || []);
@@ -52,6 +53,21 @@ function itemLink(item, className = '') {
   link.href = itemHref(item.id);
   link.dataset.item = item.id;
   return link;
+}
+function underLink(id, text, className = '') {
+  const link = el('a', className, text);
+  link.href = stateHash({ ...state, under: id });
+  link.dataset.under = id;
+  return link;
+}
+function treeGuides(guides) {
+  const gutter = el('span', 'tree-guides');
+  gutter.setAttribute('aria-hidden', 'true');
+  guides.forEach((continues, n) => {
+    const segment = el('span', `tree-guide${n === guides.length - 1 ? ' tree-branch' : ''}${continues ? ' continues' : ''}`);
+    gutter.append(segment);
+  });
+  return gutter;
 }
 function listScroll() {
   // display:none reports zero on narrow screens. Keep the visible table's
@@ -149,23 +165,39 @@ function buildFilters() {
 function renderList() {
   if (!index) return;
   table = treeRows(index, state, collapsed, inlinePins, inlineParent ? [inlineParent] : []);
-  const hidden = table.matches.filter(item => !table.visible.has(item.id)).length;
-  $('#results').textContent = `${table.matches.length} of ${index.items.length} items match${hidden ? ` · ${hidden} hidden by collapse` : ''}`;
+  const hidden = table.hiddenByCollapse.size;
+  const deeper = table.matches.filter(item => table.hiddenByDepth.has(item.id)).length;
+  $('#results').textContent = `${table.matches.length} of ${index.items.length} items match${hidden ? ` · ${hidden} hidden by collapse` : ''}${deeper ? ` · ${deeper} in deeper branches` : ''}`;
   // Selection-only refreshes should not replace links, menus or keyboard focus.
   const key = JSON.stringify([filterKey(state), index.items, [...collapsed], inlinePins]);
   if (key === renderedList) { updateLinks(); return; }
   renderedList = key;
   const active = document.activeElement;
   const activeRow = active?.closest('[data-row]')?.dataset.row;
+  const activeUnder = active?.dataset.under;
   const activeKind = active?.dataset.toggle ? '[data-toggle]' : active?.dataset.item ? '.item-link' : active?.dataset.rowAction ? '.row-actions' : active?.dataset.rowStatus ? '.row-status' : '';
   const scroll = listScroll();
   const fragment = document.createDocumentFragment();
-  for (const { item, depth, context, hasChildren, expanded, forced } of table.rows) {
+  for (const { kind, item, depth, context, hasChildren, expanded, forced, guides, matches, descendants } of table.rows) {
+    if (kind === 'more') {
+      const row = el('li', 'tree-more-row');
+      row.dataset.more = item.id;
+      row.style.setProperty('--depth', Math.min(depth, visibleTreeLevels));
+      const count = matches || descendants;
+      const link = underLink(item.id, `See more · ${count} ${matches ? 'matching ' : ''}item${count === 1 ? '' : 's'}`, 'tree-more-link');
+      link.setAttribute('aria-label', `See more under ${item.title}: ${count} ${matches ? 'matching ' : ''}item${count === 1 ? '' : 's'}`);
+      link.title = `Show descendants under ${item.title}, keeping the current filters`;
+      const marker = el('span', 'row-chevron', '…');
+      marker.setAttribute('aria-hidden', 'true');
+      row.append(treeGuides(guides), marker, link);
+      fragment.append(row);
+      continue;
+    }
     const row = el('li', `item-row${context ? ' context-row' : ''}`);
     row.dataset.row = item.id;
     row.dataset.depth = depth;
     row.dataset.context = String(context);
-    row.style.setProperty('--depth', Math.min(depth, 6));
+    row.style.setProperty('--depth', Math.min(depth, visibleTreeLevels - 1));
     const chevron = el(hasChildren ? 'button' : 'span', 'row-chevron', hasChildren ? expanded ? '⌄' : '›' : '');
     if (hasChildren) {
       chevron.type = 'button';
@@ -240,14 +272,16 @@ function renderList() {
       if (createdOutside) label.title = 'Created in this session; outside the current filters';
       title.append(label);
     }
-    row.append(chevron, status, title, tags, id, actions, description, menu);
+    row.append(treeGuides(guides), chevron, title, status, tags, id, actions, description, menu);
     row.addEventListener('click', event => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.target.closest('a, button, select, [popover]')) return;
       navigate({ ...state, item: item.id }, { focus: true });
     });
     fragment.append(row);
     if (item.id === inlineParent) {
-      inlineMount.style.setProperty('--depth', Math.min(depth + 1, 6));
+      inlineMount.style.setProperty('--depth', Math.min(depth + 1, visibleTreeLevels));
+      inlineMount.querySelector(':scope > .tree-guides')?.remove();
+      inlineMount.prepend(treeGuides([...guides, hasChildren].slice(-visibleTreeLevels)));
       fragment.append(inlineMount);
     }
   }
@@ -258,6 +292,8 @@ function renderList() {
   if (activeRow && activeKind && !active.isConnected) {
     const row = [...$('#items').children].find(node => node.dataset.row === activeRow);
     (row?.querySelector(activeKind) || $('#list-scroll')).focus({ preventScroll: true });
+  } else if (activeUnder && !active.isConnected) {
+    ([...$('#items').querySelectorAll('[data-under]')].find(link => link.dataset.under === activeUnder) || $('#list-scroll')).focus({ preventScroll: true });
   } else if (inlineMount.contains(active)) active.focus({ preventScroll: true });
   $('#empty').hidden = table.matches.length > 0 || Boolean(inlineParent);
   $('#empty').replaceChildren();
@@ -287,12 +323,21 @@ function updateSelectionContext() {
   const note = $('#selection-context');
   const selected = index?.byID.get(state.item);
   note.hidden = !selected || (table?.matching.has(state.item) && table.visible.has(state.item));
-  note.textContent = !selected ? '' : !table?.matching.has(state.item)
+  const under = selected && table?.matching.has(state.item) ? table.hiddenByDepth.get(state.item) : '';
+  const message = !selected ? '' : !table?.matching.has(state.item)
     ? 'This item is outside the current list filters. Your filters are preserved.'
+    : under
+    ? 'This item is in a deeper branch. '
     : 'This item is hidden by a collapsed ancestor. Your collapse choices are preserved.';
+  const key = JSON.stringify([message, under]);
+  if (key === renderedSelectionContext) return;
+  renderedSelectionContext = key;
+  note.textContent = message;
+  if (under) note.append(underLink(under, 'See more under its ancestor'));
 }
 function updateLinks() {
   updateSelectionContext();
+  for (const link of document.querySelectorAll('a[data-under]')) link.href = stateHash({ ...state, under: link.dataset.under });
   for (const link of document.querySelectorAll('a[data-item]')) {
     link.href = itemHref(link.dataset.item);
     if (link.classList.contains('item-link')) {
@@ -632,10 +677,14 @@ $('.skip-link').addEventListener('click', event => {
   (state.item ? $('#detail') : $('#list-scroll')).focus({ preventScroll: true });
 });
 document.addEventListener('click', event => {
-  const link = event.target.closest('a[data-item]');
+  const link = event.target.closest('a[data-item], a[data-under]');
   if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
-  navigate({ ...state, item: link.dataset.item }, { focus: true });
+  if (link.dataset.under) {
+    navigate({ ...state, under: link.dataset.under });
+    const root = [...$('#items').querySelectorAll('.item-link')].find(node => node.dataset.item === link.dataset.under);
+    (root?.getClientRects().length ? root : $('#browse').getClientRects().length ? $('#search') : $('#detail')).focus({ preventScroll: true });
+  } else navigate({ ...state, item: link.dataset.item }, { focus: true });
 });
 renderControls();
 $('#reload').disabled = true;
