@@ -10,7 +10,7 @@
 | `wrk upgrade` | Verify and atomically install a newer standalone release binary. |
 | `wrk init [directory]` | Existing target directory, default cwd. Exclusively create `.wrk` and the [default config](configuration.md). Refuse any existing entry. |
 | `wrk serve [--port 0..65535] [--open]` | Serve one existing project on `127.0.0.1`, default port 7331. Bundled page and strict read APIs; Ctrl-C stops it. |
-| `wrk new "Title"` | Create a `todo` ticket with configured prefix, priority, and labels; print ID/path. |
+| `wrk new "Title"` | Create a `todo` ticket with configured prefix, priority, and labels; print ID/path and the assigned UTC creation timestamp. |
 | `wrk new "Title" --body-file path` | Exact UTF-8 body bytes; `-` reads stdin through EOF before locking. |
 | `wrk new "Title" --parent id` | Create a child of an existing project ticket. |
 | `wrk new "Title" --depends-on id --field estimate=3` | Repeatable prerequisites and typed custom values at creation. |
@@ -230,7 +230,12 @@ and images replaced by text. CSP disables image loads entirely. See the
 POST `/api/items` accepts `title` (required string), optional `body` (string),
 `labels` (string array), `parent` (ID string or empty for none), `depends_on`, and `related`
 (ID arrays). Omitted labels use current configuration defaults; `[]` explicitly
-clears them. Creation uses todo status and current priority defaults.
+clears them. Creation uses todo status and current priority defaults. The shared
+store assigns `created_at` once using the current UTC time, retaining it across
+internal ID/publication retries. Both browser creation flows use this endpoint.
+POST and PATCH reject any supplied `created_at` (including null or the current
+value) as an unsupported field with 400 `BAD_REQUEST`. It is server-managed;
+ordinary edits preserve it and leave legacy missing dates absent.
 
 PATCH `/api/items/<id>` requires `expected_revision`, the opaque item token
 originally loaded by the caller. Editable fields are `title`, `body`, `status`,
@@ -455,10 +460,12 @@ exit 2. Drained queries, success limits, and successful explicit actions exit 0.
 
 ### Run output and logs
 
-Human mode prints the selected project/child cwd, invocation cwd, effective filters,
-ID ordering, mode/poll interval, action template, success condition, success-count
-limit, heartbeat interval, and run-log path at startup. Lifecycle progress goes to
-stderr; the final summary and explicit retry guidance go to stdout. Selection counts
+Human mode prints the selected project/child cwd, effective filters, mode/poll
+interval, executable/argument count, success condition, success-count limit,
+heartbeat interval, and run-log path at startup. Full template and expanded argv,
+invocation cwd, ordering, and other details remain in `run.jsonl`; command display
+shortening never changes executed arguments. Lifecycle progress goes to stderr;
+the final result, failure diagnostics, and recovery guidance go to stdout. Selection counts
 are current snapshot counts, not a fixed queue: `matches = processed + unprocessed`.
 Repeated labels require **all** labels, intersected with status and descendants;
 Under includes the parent's title/ID and explicitly excludes that parent.
@@ -466,9 +473,26 @@ Under includes the parent's title/ID and explicitly excludes that parent.
 Start/finish/error lines remain in the transcript. `--heartbeat-interval` accepts a
 positive Go duration (default `60s`), reporting action elapsed time and last observed
 child-output time, or explicitly saying no output was observed. No phases, percent
-complete, ETA, or hang detection are inferred. On a terminal, heartbeats replace one
-running line; redirected progress is append-only text without terminal controls.
-`TERM=dumb` disables line replacement.
+complete, ETA, or hang detection are inferred. All records are append-only, including
+on terminals: narrow widths and resizing can wrap text without erasing prior rows
+or milestones. Heartbeats use a consistent layout:
+
+```text
+RUNNING  wrk-8f9b4f7e | elapsed 8m12s | last output 4s ago
+RUNNING  wrk-12345678 | elapsed 1m12s | no output yet
+```
+
+Running/start labels are blue, waiting labels magenta, success labels green, and
+failure/interruption labels red. State labels and changing values are bold; supporting
+text keeps the terminal's default foreground. Labels carry meaning without color,
+and silence has the same running style as observed output. Styling is selected for
+each destination independently, disabled if `NO_COLOR` is present (even empty),
+`TERM=dumb`, the destination is redirected, or JSON mode is active. Every styled
+span resets immediately. Terminal themes control the ANSI palette. Human records
+use explicit CRLF on capable terminals so disabled newline translation does not
+produce staircase indentation. Redirected output and `TERM=dumb` use plain LF,
+without terminal controls. Variable titles/paths/diagnostics escape embedded line
+breaks and controls to keep record boundaries clear; full values remain in JSON.
 
 Idle explanations appear on entry or when counts/the parent title change, not every
 poll. They distinguish no raw matches from all matches already processed. Status
@@ -487,6 +511,11 @@ resolve from the **invocation directory**, unlike child paths. The directory con
   checks, output activity, and final reason.
 - `0001-<id>.stdout.log` and `0001-<id>.stderr.log`, then `0002-...`: complete raw
   bytes from each action, streamed to files without storing a transcript in memory.
+- `retry.sh`, on a failed/current action: an exact, POSIX-shell explicit-ticket
+  retry preserving the original template (including `{id}` and multiline arguments),
+  selected project, and required status. View/copy it with the printed `cat` command;
+  after inspection, `sh '/absolute/path/to/retry.sh'` runs it. It uses `wrk` from PATH,
+  as the existing JSON `retry_command` does; choose the intended CLI version first.
 
 New directories use mode 0700 and files 0600, subject to the user's umask. Files are
 written directly without application buffering, then synced/closed at action/run
@@ -497,16 +526,19 @@ not workflow checkpoints or a resume database; each invocation has a fresh proce
 set. Retention/deletion is manual.
 
 Child output is log-only by default. `--verbose` additionally mirrors both raw child
-streams to stderr, in human or JSON mode, and disables terminal line replacement.
+streams to stderr, in human or JSON mode. Before a human record following partial
+child output, the renderer inserts a newline; the raw log files and JSON-mode live
+bytes are unchanged. Terminal styling is never inserted into child logs or argv.
 The two streams retain separate full logs; their interleaving on stderr is not an
 ordering guarantee. Raw bytes may contain child-provided terminal controls. JSON
 stdout never contains raw child output or human text.
 
 Process errors (start/nonzero exit/wait) differ from an exit-0 completion-check
 failure. Failures include the observed persisted status when it can be read, ticket
-and log paths, a project-pinned `show` command, and a shell-quoted explicit-ticket
-rerun preserving the original action arguments and success requirement. Reruns begin
-at the start; inspect partial changes first. A handled stop reports the actual reason,
+and labeled log locations (one shared directory plus filenames), a project-pinned
+`show` command, and the location of the full retry file. Large retry commands are
+not printed in the concise result; `retry_command` remains in JSON and the run log.
+Reruns begin at the start; inspect partial changes first. A handled stop reports the actual reason,
 successful-action count, elapsed time, failed/current ticket when relevant, and logs.
 Logging or output failures stop execution, including the active process group, before
 another ticket can start. A broken stdout/stderr pipe is handled as an output failure.
@@ -537,7 +569,7 @@ The `result` event contract:
 | optional `action` | Attempt's `sequence` (1-based within this run), selected ticket summary, exact expanded `command` array, `started`, optional `ended`, `elapsed_ns`, `exit_code` (null before launch/start failure, -1 if signaled), optional `signal`, `required_status`, `observed_status`, `failure`, `stdout_log`, `stderr_log`, `completion_check`, and `output`. |
 | `action.completion_check` | `not_run`, `passed`, or `failed`; process failure skips completion checking. Passing verifies a valid existing ticket and the optional required status. |
 | `action.output` | `stdout_bytes`, `stderr_bytes` observed from the child and optional `last_output` timestamp. Absent last output means none observed; this is not a progress estimate. |
-| optional `show_command`, `retry_command` | Copyable POSIX-shell diagnostics for failed/current actions; original template arguments and selected project are preserved. |
+| optional `show_command`, `retry_command`, `retry_file` | Copyable POSIX-shell diagnostics for failed/current actions; original template arguments and selected project are preserved. `retry_file` is the absolute path to the private retry script. Existing fields and events remain compatible. |
 | optional `outcome` | Only on `finished`: `successful`, `reason`, `elapsed_ns`, `last_action`, optional `failure`. Reasons: `drained`, `limit`, `ticket`, `interrupted`, `project`, `selection`, `start`, `exit`, `wait`, `completion`, `output`. Failures contain `kind`, `message`, and optional structured `diagnostics`. |
 
 Normally `started` precedes selection/idle events; each action has `action_started`,
@@ -802,14 +834,19 @@ Read commands create no locks, caches, or other files.
 
 ## Human and JSON output
 
-Human lists show ID, status, priority, title, and blockers. `show` separates derived
-information from source. Terminal controls are escaped in human output. JSON uses
+Human lists show ID, status, priority, title, blockers, and `CREATED_AT` (the stored
+timestamp or `unknown`). `new` prints `ID PATH (created TIMESTAMP)` with its assigned
+UTC date. `show` exposes the field in the exact stored source when present and separates derived
+information from source. Data containing terminal controls is escaped in human
+output; `run` can add its own [terminal styling](#run-output-and-logs). JSON uses
 standard escaping and retains source content exactly.
 
 Except for [serve lifecycle events](#serve-output) and [run events](#run-json-events), JSON is exactly one object
 plus newline on stdout, including ordinary failures;
-there is no duplicate routine stderr diagnostic. Human errors go to stderr.
-Ordinary ticket commands have no prompts, progress messages, or incidental timestamps.
+there is no duplicate routine stderr diagnostic. Human errors go to stderr,
+except handled `run` failures grouped with its final stdout result and recovery.
+Ordinary ticket commands have no prompts or progress messages. Creation dates are
+stored item metadata; reads and updates do not generate fresh timestamps.
 `run` emits lifecycle events in JSON mode; `--verbose` additionally sends raw child
 output to stderr. See [scoped command execution](#scoped-command-execution).
 
@@ -826,6 +863,7 @@ output to stderr. See [scoped command execution](#scoped-command-execution).
       "revision": "<opaque source revision>",
       "title": "Example",
       "status": "in-progress",
+      "created_at": "2026-10-15T18:42:03Z",
       "parent": null,
       "depends_on": [],
       "related": [],
@@ -847,6 +885,16 @@ slash-separated, and independent of cwd. Tickets, children, blockers, dependency
 IDs, and labels are lexicographically sorted. Empty arrays are `[]`, never null.
 Blocker objects contain `id` and `status`. Summary defaults are effective values
 and never cause omitted source fields to be inserted during updates.
+
+Every CLI/HTTP ticket summary includes `created_at`: the stored RFC 3339 string,
+or JSON `null` for a legacy item with no date. This includes creation/update
+responses, CLI list/show/children, HTTP `/api/items`, `/api/items/<id>`,
+`/api/workspace`, and all nested parent/child/dependency/dependent/related summaries.
+Neither `new` nor `update` accepts a timestamp flag. Dates are immutable through
+supported mutations; reads/edits never backfill unknown dates. See the accepted
+[timestamp syntax and older-client compatibility](ticket-format.md#creation-timestamps).
+Upgrade all clients before creating new items; older strict readers reject the
+new field. JSON schema and ticket format remain version 1.
 
 | Command | Successful `result` |
 | --- | --- |

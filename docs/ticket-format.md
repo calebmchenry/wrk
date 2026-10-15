@@ -31,6 +31,7 @@ field. The ticket format remains version 1 with no migration. See
 id: wrk-a7f39c21
 title: Add ticket creation
 status: todo
+created_at: 2026-10-15T18:42:03Z
 parent: wrk-b2c84e16
 depends_on:
   - wrk-d9e16a02
@@ -71,6 +72,7 @@ The references in this example are illustrative. Actual relationships must point
 | `id` | Yes | Stable identity, matching the filename without `.md`. |
 | `title` | Yes | Nonempty, single-line summary. |
 | `status` | Yes | `todo`, `in-progress`, `blocked`, `done`, or `canceled`. |
+| `created_at` | No | Immutable creation timestamp assigned by wrk; absent means unknown. See [creation timestamps](#creation-timestamps). |
 | `parent` | No | ID of the single ticket this work belongs to. Omit for a root ticket. |
 | `depends_on` | No | List of prerequisite ticket IDs; absent means no dependencies. |
 | `related` | No | Contextual ticket IDs stored on this endpoint; reciprocal display is derived. Absent means no outgoing links. |
@@ -79,6 +81,38 @@ The references in this example are illustrative. Actual relationships must point
 | `fields` | No | Map of project-specific values; absent means no custom values. |
 
 Use only the built-in fields at the top level; custom data belongs under `fields`. Duplicate YAML keys are invalid. Empty relationship lists may be omitted. Clearing a parent removes the field.
+
+## Creation timestamps
+
+`wrk new` and the server's POST `/api/items` assign `created_at` through the same
+creation path. The clock is read once before ID/publication retries; the saved
+value is UTC at whole-second precision, formatted as `YYYY-MM-DDTHH:MM:SSZ`.
+There is no creation-time override, timestamp edit command, or `updated_at` field.
+Supported updates preserve the stored value, including body-only, relationship,
+recursive-label, and browser edits.
+
+Readers accept a quoted YAML string or an unquoted YAML timestamp (including an
+alias to either) containing a complete RFC 3339 date/time: four-digit year,
+two-digit month/day/hour/minute/second, uppercase `T`, and uppercase `Z` or an
+explicit `±HH:MM` offset. Optional decimal fractions contain 1–9 digits after a
+period. Dates must be calendar-valid; hours are 00–23, minutes/seconds 00–59,
+and offset hours/minutes 00–23/00–59. Leap seconds, date-only values, timezone-free
+values, null, empty strings, and other YAML types are rejected with
+`INVALID_TICKET` identifying `created_at` and an example. Accepted stored spelling,
+offset, precision, and YAML type survive edits; JSON returns the stored string.
+
+Legacy items may omit the field. Absence stays absent on reads and edits: wrk
+never infers dates from Git or filesystem metadata, inserts a zero/current date,
+or backfills old items. JSON summaries always include `created_at`, using `null`
+for unknown dates. Human lists show `unknown`; browser details show
+“Created date unknown.” Date sorting/filtering and historical backfill are not
+provided.
+
+This optional field extends **format version 1** without migration. Older strict
+clients reject the unknown `created_at` key and may refuse all project data
+commands once a new item is created. Upgrade **all CLI and running server clients**
+before creating items with this build. Old items remain compatible while the
+field is absent; there is no automatic downgrade or rewrite.
 
 ## Identity
 
@@ -134,4 +168,4 @@ Status changes are explicit. Completing children does not close a parent, comple
 
 Describe the intended outcome and what counts as done. Add context, code or documentation links, and checkable acceptance criteria when useful. The headings in the example are a suggested template, not a required schema; a small task can have a small body.
 
-Keep notes useful for handoff: current decisions, discoveries, and remaining work. Git provides edit history. There is no separate comments database, assignment system, or required timestamp metadata in the initial format.
+Keep notes useful for handoff: current decisions, discoveries, and remaining work. Git provides edit history. There is no separate comments database or assignment system. Creation timestamps are automatic for new items and optional for legacy items.

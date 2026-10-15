@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 	"wrk/internal/diagnostic"
 	"wrk/internal/project"
 	"wrk/internal/ticket"
@@ -40,6 +41,11 @@ func createContext(ctx context.Context, root string, options CreateOptions, limi
 	}
 	return withLock(ctx, limits, root, nil, func(s *project.Snapshot) Mutation {
 		result := Mutation{Snapshot: s, Diagnostics: []diagnostic.Diagnostic{}}
+		clock := time.Now
+		if h != nil && h.now != nil {
+			clock = h.now
+		}
+		createdAt := clock()
 		for attempt := 0; attempt < 128; attempt++ {
 			token := make([]byte, 4)
 			if _, err := io.ReadFull(random, token); err != nil {
@@ -66,7 +72,7 @@ func createContext(ctx context.Context, root string, options CreateOptions, limi
 			if options.LabelsSet {
 				labels = options.Labels
 			}
-			data, err := ticket.CreateWithRelated(id, options.Title, priority, options.Parent, labels, options.Dependencies, options.Related, options.Fields, options.Body)
+			data, err := ticket.CreateWithRelated(id, options.Title, priority, options.Parent, labels, options.Dependencies, options.Related, options.Fields, options.Body, createdAt)
 			if err != nil {
 				result.Diagnostics = append(result.Diagnostics, operationError(err, path, false))
 				return result

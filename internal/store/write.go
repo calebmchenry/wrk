@@ -8,11 +8,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // Hooks are private, per-operation deterministic fault seams used by store tests.
 // Production never reads fault settings from arguments or environment variables.
-type hooks struct{ at func(string) error }
+type hooks struct {
+	at  func(string) error
+	now func() time.Time
+}
 
 func (h *hooks) hit(point string) error {
 	if h != nil && h.at != nil {

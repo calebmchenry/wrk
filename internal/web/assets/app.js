@@ -503,7 +503,15 @@ function renderDetail() {
     metadata.append(el('summary', '', 'Custom fields & original metadata (YAML)'), el('pre', '', data.result.metadata));
     const source = el('details', 'detail-section');
     source.append(el('summary', '', 'Original Markdown source'), el('pre', '', data.result.body));
+    const created = el('p', 'hint created-at', 'Created ');
+    if (item.created_at) {
+      const date = el('time', '', new Date(item.created_at).toISOString().replace('T', ' ').replace(/\.000Z$/, 'Z').replace('Z', ' UTC'));
+      date.dateTime = item.created_at;
+      date.title = item.created_at;
+      created.append(date);
+    } else created.append('date unknown');
     $('#detail-content').append(el('p', 'hint', `${item.priority} priority`),
+      created,
       relationships('Children', data.result.children, `${progress(data.result.children)} · Direct children only; parent status stays explicit.`),
       relationships('Dependents', data.result.dependents, 'Items that depend on this one.'),
       metadata, source);

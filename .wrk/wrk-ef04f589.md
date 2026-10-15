@@ -112,3 +112,22 @@ wrk-0a233d21 remains open for its own outcome/acceptance review. Its reviewer ca
 [run output verification](../docs/run-output-verification.md), the four completed
 child tickets, and the migration/recovery docs. No real backlog burn or release
 publication is needed for that review.
+
+## Post-burn wrapper confirmation (2026-10-10)
+
+The user requested adapting the burn script after the completed milestone run.
+Inspection confirmed that this ticket had already made the requested change:
+scripts/ticket-burn.py is an exec-only wrapper forwarding native wrk run options,
+with the existing Codex command/prompt and required persisted done check. The old
+selection/process/logging loop and --list-command interface are already removed;
+no additional production-code changes were needed.
+
+Fresh verification passed: all four Python wrapper tests; the targeted uncached
+Go TestRunCodexBurn cases (done, failure, unfinished) and
+TestRunMultiStepExplicitRetry; and an actual wrapper -> freshly built current CLI
+-> isolated fake Codex smoke in disposable projects. The smoke checked exact
+arguments, fresh child processes, persisted done, limit/drain/empty behavior,
+selected project cwd, JSON plus verbose output, and spaced invocation-relative
+log paths. No real Codex call or backlog execution ran. Temporary build/projects
+and smoke captures were removed after verification. This follow-up records the
+confirmation; the migration and milestone remain done.

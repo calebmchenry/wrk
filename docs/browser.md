@@ -336,6 +336,18 @@ lower sections with removal controls and a small add picker even when empty.
 Children, direct-child progress, reverse dependents, priority, original Markdown and
 exact metadata remain below the document. Tags map to CLI labels.
 
+The detail panel also shows read-only **Created** metadata in UTC, with an explicit
+`UTC` suffix. The date is rendered to millisecond precision when needed; the
+`time` element and its tooltip retain the complete stored RFC 3339 value.
+Legacy items without a date show **Created date unknown**. The creation modal
+and inline child form both receive server-assigned `created_at` values; there is
+no date input or override. Polling/refresh displays the saved date for new items,
+and all text/metadata/status/relationship saves preserve it. Editing an undated
+item does not add a date. HTTP summaries use a string or `null` consistently with
+CLI JSON. See [timestamp syntax and compatibility](ticket-format.md#creation-timestamps):
+upgrade all CLI and running server clients before creating items with this build,
+because older strict clients reject the new frontmatter field.
+
 A small indicator beside each metadata control shows Saving, Saved, or an error.
 A failed write keeps the requested value and offers a local **Retry**; validation
 errors identify the control. Pending picker text is retained across polling and
@@ -559,7 +571,9 @@ expecting `serve` to reject a missing project can instead start a server. Use
 `docker run --init` so interruption tests' child processes are reaped. Run checks
 as an unprivileged user to exercise permission failures. Install Chromium and its
 system dependencies in the container (`npx playwright install --with-deps chromium`);
-when installed as root, place the browser cache in a readable shared location and
+use Node.js 20 or newer first (Debian Bookworm's default Node.js 18 cannot run this
+checkout's Playwright version).
+When installed as root, place the browser cache in a readable shared location and
 set `PLAYWRIGHT_BROWSERS_PATH` for the test user. These are test-environment
 requirements; no product code or tests need to be relaxed.
 

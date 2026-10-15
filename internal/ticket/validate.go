@@ -4,6 +4,7 @@ import (
 	"go.yaml.in/yaml/v3"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 	"wrk/internal/diagnostic"
 	"wrk/internal/schema"
@@ -14,6 +15,10 @@ var FilenamePattern = regexp.MustCompile(`^[a-z][a-z0-9]{0,15}-[0-9a-f]{8}\.md$`
 var PrefixPattern = regexp.MustCompile(`^[a-z][a-z0-9]{0,15}$`)
 var Statuses = map[string]bool{"todo": true, "in-progress": true, "blocked": true, "done": true, "canceled": true}
 var Priorities = map[string]bool{"low": true, "normal": true, "high": true, "urgent": true}
+
+// Constrain Go's permissive RFC3339 parser to full, zoned timestamps with
+// uppercase separators, decimal fractions, and valid numeric offsets.
+var createdAtSyntax = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$`)
 
 type FieldDefinition struct {
 	Type, Description string
@@ -29,7 +34,7 @@ func Validate(t *Ticket, definitions map[string]FieldDefinition) []diagnostic.Di
 	if n == nil {
 		return nil
 	}
-	allowed := map[string]bool{"id": true, "title": true, "status": true, "parent": true, "depends_on": true, "related": true, "priority": true, "labels": true, "fields": true}
+	allowed := map[string]bool{"id": true, "title": true, "status": true, "created_at": true, "parent": true, "depends_on": true, "related": true, "priority": true, "labels": true, "fields": true}
 	ds := schema.Keys(n, allowed, t.Path, "", "INVALID_TICKET")
 	m := schema.Map(n)
 	add := func(field, message string) {
@@ -43,6 +48,21 @@ func Validate(t *Ticket, definitions map[string]FieldDefinition) []diagnostic.Di
 	t.ID, _ = schema.String(m["id"])
 	t.Title, _ = schema.String(m["title"])
 	t.Status, _ = schema.String(m["status"])
+	t.CreatedAt = nil
+	if v, exists := m["created_at"]; exists {
+		v = schema.Resolve(v)
+		valid := v != nil && v.Kind == yaml.ScalarNode && (v.Tag == "!!str" || v.Tag == "!!timestamp") && createdAtSyntax.MatchString(v.Value)
+		if valid {
+			_, err := time.Parse(time.RFC3339Nano, v.Value)
+			valid = err == nil
+		}
+		if !valid {
+			add("created_at", "expected an RFC 3339 timestamp such as 2026-10-15T18:42:03Z (uppercase T, Z or ±HH:MM timezone, optional 1–9 fractional digits); omit the field if unknown")
+		} else {
+			value := v.Value
+			t.CreatedAt = &value
+		}
+	}
 	if s, ok := schema.String(m["id"]); ok && !IDPattern.MatchString(s) {
 		add("id", "expected prefix and eight lowercase hexadecimal characters")
 	}

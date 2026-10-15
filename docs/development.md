@@ -37,7 +37,15 @@ Tests use disposable projects and retain the
 immutable original data in `testdata/compat/.wrk/`. [Sprint 001 evidence](sprints/SPRINT-001-EXECUTION.md)
 records macOS/Linux verification and clean-source build/install runs.
 
-For browser changes, also run `npm ci`, `npx playwright install chromium`, and
+For run-rendering changes, build the CLI and run
+`python3 scripts/verify-run-output.py ./bin/wrk`. This standard-library harness
+uses real PTYs, fake children, and disposable projects to check resizing, raw
+terminal newline handling, mixed destinations, styling, and byte isolation. It
+prints retained capture locations for manual review; an optional second argument
+chooses the capture directory. See [run output evidence](run-output-verification.md).
+
+Browser tests require Node.js 20 or newer (the Playwright dependency's engine
+requirement). For browser changes, also run `npm ci`, `npx playwright install chromium`, and
 `npm run test:browser`. These are development dependencies only; the executable
 embeds the complete UI. See [browser checks](browser.md#verification).
 Run `python3 scripts/verify-workspace.py ./bin/wrk` after building to verify the

@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/sys/unix"
 	"wrk/internal/diagnostic"
 	"wrk/internal/runner"
 )
@@ -27,6 +26,7 @@ type runRecord struct {
 	Ordering      string `json:"ordering"`
 	ShowCommand   string `json:"show_command,omitempty"`
 	RetryCommand  string `json:"retry_command,omitempty"`
+	RetryFile     string `json:"retry_file,omitempty"`
 }
 
 type runOutput struct {
@@ -35,7 +35,9 @@ type runOutput struct {
 	root, cwd, dir, logPath string
 	log, stdout, stderr     *os.File
 	out, errout             io.Writer
-	terminal, runningLine   bool
+	livePartial             bool
+	liveOutput              bool
+	retryFile               string
 }
 
 func newRunOutput(r Request, root, cwd string, out, errout io.Writer) (*runOutput, error) {
@@ -60,10 +62,6 @@ func newRunOutput(r Request, root, cwd string, out, errout io.Writer) (*runOutpu
 	w.log, err = os.OpenFile(w.logPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("create %s: %w", w.logPath, err)
-	}
-	if f, ok := errout.(*os.File); ok && !r.JSON && !r.Verbose && os.Getenv("TERM") != "dumb" {
-		_, err := unix.IoctlGetWinsize(int(f.Fd()), unix.TIOCGWINSZ)
-		w.terminal = err == nil
 	}
 	return w, nil
 }
@@ -91,6 +89,10 @@ func (w runChildWriter) Write(p []byte) (int, error) {
 	if r.r.Verbose {
 		if err := writeRun(r.errout, p); err != nil {
 			return n, fmt.Errorf("live child output: %w", err)
+		}
+		if len(p) > 0 {
+			r.liveOutput = true
+			r.livePartial = p[len(p)-1] != '\n'
 		}
 	}
 	return n, nil
@@ -170,6 +172,12 @@ func (w *runOutput) event(e runner.Event) error {
 			// Re-run the original action template with this explicit ticket.
 			retry = append(retry, w.r.ChildCommand...)
 			record.RetryCommand = shellCommand(retry)
+			if w.retryFile == "" {
+				if err := w.writeRetry(record.RetryCommand); err != nil {
+					return err
+				}
+			}
+			record.RetryFile = w.retryFile
 		}
 	}
 	errorsOut := []diagnostic.Diagnostic{}
@@ -246,127 +254,19 @@ func scopeExplanation(e runner.Event) string {
 	return fmt.Sprintf("Same label/descendant scope (status filters removed for diagnostics only): %d ready, %d todo waiting on dependencies, %d in-progress, %d manually blocked, %d done, %d canceled.", c.Ready, c.Waiting, c.InProgress, c.Blocked, c.Done, c.Canceled)
 }
 
-func activityText(e runner.Event) string {
-	a := e.Action
-	last := "no child output observed"
-	if a.Output.LastOutput != nil {
-		last = "last child output " + duration(e.Time.Sub(*a.Output.LastOutput)) + " ago"
+// The retry is an inspectable artifact, never executed by the runner. Keep it
+// separate from compact human output, including for multiline arguments.
+func (w *runOutput) writeRetry(command string) error {
+	path := filepath.Join(w.dir, "retry.sh")
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return fmt.Errorf("create retry file: %w", err)
 	}
-	return fmt.Sprintf("Running #%d %s; elapsed %s; %s", a.Sequence, a.Ticket.ID, duration(a.Elapsed), last)
-}
-
-func (w *runOutput) human(r runRecord, diagnostics []diagnostic.Diagnostic) error {
-	e := r.Event
-	var message string
-	destination := w.errout
-	switch e.Kind {
-	case "started":
-		mode := "ordinary; exit when no unprocessed matches remain"
-		if e.Stream {
-			mode = "stream; idle poll every " + e.PollInterval.String()
-		}
-		success := "exit 0 and valid existing ticket"
-		if e.ExpectStatus != "" {
-			success += "; persisted status " + e.ExpectStatus
-		}
-		limit := "unlimited"
-		if e.MaxTickets > 0 {
-			limit = fmt.Sprint(e.MaxTickets)
-		}
-		message = fmt.Sprintf("Project / child cwd: %s\nInvocation cwd: %s\nSelection: %s\nOrder: %s\nMode: %s; heartbeat every %s\nAction template: %s\nSuccess: %s; successful-action limit: %s\nRun log: %s", w.root, w.cwd, r.Selection, r.Ordering, mode, e.HeartbeatInterval, shellCommand(e.Command), success, limit, w.logPath)
-	case "selection":
-		message = fmt.Sprintf("Selection: %s; %d current matches, %d already processed, %d unprocessed candidates; %s.", r.Selection, e.Matches, e.Processed, e.Unprocessed, r.Ordering)
-		if e.Unprocessed == 0 {
-			message += "\n" + emptyExplanation(e) + ".\n" + scopeExplanation(e)
-		}
-	case "idle_started", "idle_changed":
-		message = fmt.Sprintf("Waiting: no unprocessed matches (%d current matches, %d already processed); %s. Polling every %s; idle %s.\nSelection: %s\n%s", e.Matches, e.Processed, emptyExplanation(e), e.PollInterval, duration(e.Idle.Elapsed), r.Selection, scopeExplanation(e))
-	case "idle_finished":
-		message = fmt.Sprintf("Left idle after %s; %d unprocessed matches.", duration(e.Idle.Elapsed), e.Unprocessed)
-	case "action_started":
-		a := e.Action
-		message = fmt.Sprintf("Starting %s: #%d %q (priority %s); %s.\nCommand: %s\nChild logs: %s ; %s", a.Ticket.ID, a.Sequence, a.Ticket.Title, a.Ticket.Priority, r.Ordering, shellCommand(a.Command), a.StdoutLog, a.StderrLog)
-	case "heartbeat":
-		message = activityText(e)
-	case "action_finished":
-		a := e.Action
-		exit := "not started"
-		if a.ExitCode != nil {
-			exit = fmt.Sprintf("exit %d", *a.ExitCode)
-		}
-		outcome := "successful action"
-		if a.Failure != nil {
-			outcome = "process failure"
-			if a.Failure.Kind == "completion" {
-				outcome = "completion check failed"
-			}
-			if a.Failure.Kind == "interrupted" {
-				outcome = "interrupted"
-			}
-			if a.Failure.Kind == "output" {
-				outcome = "output failure"
-			}
-		}
-		message = fmt.Sprintf("Finished %s: #%d %s; %s; elapsed %s", a.Ticket.ID, a.Sequence, outcome, exit, duration(a.Elapsed))
-		if a.Signal != "" {
-			message += "; signal " + a.Signal
-		}
-		if a.ObservedStatus != "" {
-			message += "; observed status " + a.ObservedStatus
-		}
-		if a.RequiredStatus != "" {
-			message += "; required status " + a.RequiredStatus + " (" + a.CompletionCheck + ")"
-		}
-	case "finished":
-		destination = w.out
-		result := e.Result
-		reason := result.Reason
-		switch reason {
-		case "drained":
-			reason = "no unprocessed matches remain in the current query"
-		case "limit":
-			reason = "successful-action limit reached"
-		case "ticket":
-			reason = "explicit ticket action succeeded"
-		case "interrupted":
-			reason = "interrupted by SIGINT/SIGTERM or cancellation"
-		}
-		if result.Failure != nil {
-			reason += ": " + result.Failure.Message
-		}
-		message = fmt.Sprintf("Run %s: %d successful actions. Elapsed %s; stopped: %s.\nRun log: %s", result.Reason, result.Successful, duration(result.Elapsed), reason, w.logPath)
-		if result.LastAction != nil && (result.LastAction.Failure != nil || result.LastAction.Ended == nil) {
-			a := result.LastAction
-			message += fmt.Sprintf("\nFailed/current ticket: %s; child logs: %s ; %s", a.Ticket.ID, a.StdoutLog, a.StderrLog)
-		}
-		if r.RetryCommand != "" {
-			message += "\nShow ticket:\n" + r.ShowCommand + "\nInspect partial changes, then retry from the beginning:\n" + r.RetryCommand
-		}
+	err = writeRun(f, []byte("#!/bin/sh\n# Inspect partial changes before retrying from the beginning.\n"+command+"\n"))
+	err = errors.Join(err, closeRunFile(&f))
+	if err != nil {
+		return fmt.Errorf("write retry file: %w", err)
 	}
-	if w.runningLine {
-		if err := writeRun(w.errout, []byte("\r\x1b[2K")); err != nil {
-			return err
-		}
-		w.runningLine = false
-	}
-	if message != "" {
-		text := Safe(message)
-		if e.Kind == "heartbeat" && w.terminal {
-			w.runningLine = true
-			return writeRun(w.errout, []byte(text))
-		}
-		if err := writeRun(destination, []byte(text+"\n")); err != nil {
-			return err
-		}
-	}
-	// Keep errors as permanent milestones. The final event owns diagnostics so
-	// an action failure isn't printed twice.
-	if e.Kind == "finished" {
-		for _, d := range diagnostics {
-			if err := writeRun(w.errout, []byte(Safe(fmt.Sprintf("%s: %s %s\n", d.Code, d.Path, d.Message)))); err != nil {
-				return err
-			}
-		}
-	}
+	w.retryFile = path
 	return nil
 }

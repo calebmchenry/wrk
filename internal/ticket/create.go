@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"go.yaml.in/yaml/v3"
+	"time"
 )
 
 func Create(id, title, priority string, parent *string, labels []string, body []byte) ([]byte, error) {
@@ -11,16 +12,18 @@ func Create(id, title, priority string, parent *string, labels []string, body []
 }
 
 func CreateWithMetadata(id, title, priority string, parent *string, labels, dependencies []string, fields []FieldValue, body []byte) ([]byte, error) {
-	return CreateWithRelated(id, title, priority, parent, labels, dependencies, nil, fields, body)
+	return CreateWithRelated(id, title, priority, parent, labels, dependencies, nil, fields, body, time.Now())
 }
 
-func CreateWithRelated(id, title, priority string, parent *string, labels, dependencies, related []string, fields []FieldValue, body []byte) ([]byte, error) {
+// createdAt is captured by the store once, before any ID/publication retries.
+func CreateWithRelated(id, title, priority string, parent *string, labels, dependencies, related []string, fields []FieldValue, body []byte, createdAt time.Time) ([]byte, error) {
 	n := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	scalar := func(s string) *yaml.Node { return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: s} }
 	add := func(k string, v *yaml.Node) { n.Content = append(n.Content, scalar(k), v) }
 	add("id", scalar(id))
 	add("title", scalar(title))
 	add("status", scalar("todo"))
+	add("created_at", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!timestamp", Value: createdAt.UTC().Format(time.RFC3339)})
 	if parent != nil {
 		add("parent", scalar(*parent))
 	}

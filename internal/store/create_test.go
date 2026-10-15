@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"wrk/internal/project"
 )
 
@@ -74,7 +75,11 @@ func TestBoundedCollisionAndLateCollision(t *testing.T) {
 		t.Fatal("clobbered collision")
 	}
 	calls := 0
-	r = create(root, CreateOptions{Title: "New"}, bytes.NewReader([]byte{0, 0, 0, 1, 0, 0, 0, 2}), &hooks{at: func(point string) error {
+	clockCalls := 0
+	r = create(root, CreateOptions{Title: "New"}, bytes.NewReader([]byte{0, 0, 0, 1, 0, 0, 0, 2}), &hooks{now: func() time.Time {
+		clockCalls++
+		return time.Date(2026, 10, 15, 18, 42, clockCalls, 0, time.UTC)
+	}, at: func(point string) error {
 		if point == "after_compare" {
 			calls++
 			if calls == 1 {
@@ -85,6 +90,9 @@ func TestBoundedCollisionAndLateCollision(t *testing.T) {
 	}})
 	if len(r.Diagnostics) > 0 || !r.Created || r.Ticket.ID != "wrk-00000002" {
 		t.Fatal(r)
+	}
+	if clockCalls != 1 || r.Ticket.CreatedAt == nil || *r.Ticket.CreatedAt != "2026-10-15T18:42:01Z" {
+		t.Fatalf("creation timestamp changed across publication retries: calls=%d, ticket=%+v", clockCalls, r.Ticket)
 	}
 	got, _ = os.ReadFile(filepath.Join(root, ".wrk/wrk-00000001.md"))
 	if !bytes.Contains(got, []byte("title: Old")) {

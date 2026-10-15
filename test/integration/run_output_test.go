@@ -127,8 +127,9 @@ func TestRunRetryCommandRoundTripsArguments(t *testing.T) {
 	_, data, _ := runAction(t, launch, 1, []string{"--config", filepath.Join(selected, ".wrk/config.yaml"), "--expect-status=todo"}, args)
 	e := runFinalEnvelope(t, []byte(data))
 	var event struct {
-		Retry string `json:"retry_command"`
-		Show  string `json:"show_command"`
+		Retry     string `json:"retry_command"`
+		RetryFile string `json:"retry_file"`
+		Show      string `json:"show_command"`
 	}
 	if err := json.Unmarshal(e.Result, &event); err != nil {
 		t.Fatal(err)
@@ -142,7 +143,11 @@ func TestRunRetryCommandRoundTripsArguments(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", filepath.Dir(binary)+string(os.PathListSeparator)+os.Getenv("PATH"))
-	cmd := exec.Command("/bin/sh", "-c", event.Retry)
+	retry, err := os.ReadFile(event.RetryFile)
+	if err != nil || !bytes.HasSuffix(retry, []byte(event.Retry+"\n")) {
+		t.Fatalf("retry file differs from JSON: %q %v", retry, err)
+	}
+	cmd := exec.Command("/bin/sh", event.RetryFile)
 	cmd.Dir = launch
 	if data, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("retry: %v %s", err, data)

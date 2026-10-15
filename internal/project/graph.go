@@ -18,6 +18,7 @@ type Summary struct {
 	Revision        string    `json:"revision"`
 	Title           string    `json:"title"`
 	Status          string    `json:"status"`
+	CreatedAt       *string   `json:"created_at"`
 	Parent          *string   `json:"parent"`
 	DependsOn       []string  `json:"depends_on"`
 	Related         []string  `json:"related"`
@@ -34,7 +35,7 @@ func (s *Snapshot) Summary(t *ticket.Ticket) Summary {
 	sort.Strings(labels)
 	return Summary{
 		ID: t.ID, Path: t.Path, Revision: ticket.Revision(t.Source), Title: t.Title,
-		Status: t.Status, Parent: t.Parent, DependsOn: deps, Related: s.RelatedIDs(t.ID),
+		Status: t.Status, CreatedAt: t.CreatedAt, Parent: t.Parent, DependsOn: deps, Related: s.RelatedIDs(t.ID),
 		RelatedRevision: s.RelatedRevision(t.ID), Priority: t.Priority, Labels: labels, Blockers: s.Blockers(t),
 	}
 }

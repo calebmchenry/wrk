@@ -184,7 +184,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply(w, 200, &h.root, projectInfo(s), nil)
 	case path == "/api/workspace":
 		// Always load and validate before checking the validator. Only ticket and
-		// config bytes contribute, never timestamps, locks, or staging files.
+		// config bytes contribute, never filesystem timestamps, locks, or staging files.
 		etag := workspaceTag(s, selected)
 		w.Header().Set("ETag", etag)
 		if r.Header.Get("If-None-Match") == etag {

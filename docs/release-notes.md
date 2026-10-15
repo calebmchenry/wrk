@@ -1,18 +1,27 @@
 Standalone wrk binaries for macOS and Linux on amd64 and arm64. Go is not required.
 
-## New in v0.2.0
+## New in v0.3.0
 
-- Open a bundled local browser workspace with `wrk serve --open`. Search and filter
-  tickets, expand parent/child rows, create tickets and inline children, and edit
-  details directly. Agent and filesystem changes appear automatically, with
-  conflict detection to protect unsaved drafts.
-- Run a command for a ticket or filtered scope with `wrk run`. Continuous polling,
-  expected-status checks, per-ticket logs, progress output, and JSON events support
-  agent workflows. The Codex ticket-burn wrapper now uses this runner.
-- Create and update parent relationships, dependencies, related-ticket links,
-  priorities, labels, and typed custom fields through the CLI.
-- Replace ticket bodies with `--body-file` and select projects explicitly with
-  `--project` or `--config`.
+- New tickets receive an immutable UTC `created_at` timestamp through both
+  `wrk new` and the browser. CLI lists and JSON/API responses expose it, and the
+  browser shows a read-only creation date. Existing undated tickets remain undated.
+- `wrk run` now uses compact status records, readable heartbeats, and terminal
+  colors that respect `NO_COLOR`, `TERM=dumb`, and redirected output. Multiline
+  prompts stay in the logs, and failures provide an exact `retry.sh` file to inspect
+  before rerunning. Completion checks and explicit retry behavior are unchanged.
+- Browser rows show clearer hierarchy guides across four levels, with **See more**
+  scopes for deeper branches and more consistent expansion and filtering.
+
+## Compatibility
+
+Upgrade all CLI clients and restart running `wrk serve` instances with v0.3.0
+before creating new tickets. Older strict clients reject the new `created_at`
+frontmatter field and may refuse project data commands once it is present.
+Existing tickets need no migration or date backfill.
+
+Human `new` output includes the assigned date, human lists add `CREATED_AT`, and
+JSON/API ticket summaries add `created_at` (a timestamp string or `null`). Run JSON
+events retain existing fields and add `retry_file` for failed/current actions.
 
 ## Install or upgrade
 

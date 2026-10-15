@@ -264,6 +264,9 @@ test('separate CLI create/status/labels/parent/dependencies/body changes refresh
     await expect(link).toBeVisible({ timeout: 2000 });
     await link.click();
     await expectTitle(page, 'Live agent item');
+    const createdAt = cli('show', created).ticket.created_at;
+    await expect(page.locator('.created-at time')).toHaveAttribute('datetime', createdAt);
+    await expect(page.locator('.created-at')).toContainText('UTC');
     for (const status of ['in-progress', 'done']) {
       cli('update', created, '--status', status);
       await expect(editForm(page).getByLabel('Status', { exact: true })).toHaveValue(status, { timeout: 2000 });
@@ -288,6 +291,7 @@ test('separate CLI create/status/labels/parent/dependencies/body changes refresh
     cli('update', created, '--remove-dependency', id(6), '--no-parent');
     await expect(currentDetail(page)).not.toContainText('Unfinished dependencies:', { timeout: 2000 });
     await expect(currentDetail(page).getByRole('link', { name: 'Build a local workspace' })).toHaveCount(0);
+    await expect(page.locator('.created-at time')).toHaveAttribute('datetime', createdAt);
     await rm(path);
     await expectTitle(page, 'Item not found', { timeout: 2000 });
     await expect(link).toHaveCount(0);
@@ -475,7 +479,7 @@ async function changeParent(page, value) {
   await expect(editForm(page).getByLabel('Status', { exact: true })).toBeEnabled();
 }
 
-test('browser creation honors defaults and optional fields; CLI reads saved bytes', async ({ page }) => {
+test('browser creation honors defaults and optional fields; CLI reads saved bytes', async ({ page }, testInfo) => {
   const configPath = join(root, '.wrk/config.yaml');
   const config = await readFile(configPath);
   const created = [];
@@ -490,6 +494,8 @@ test('browser creation honors defaults and optional fields; CLI reads saved byte
     created.push(new URL(page.url()).hash.match(/item=([^&]+)/)[1]);
     let saved = cli('show', created[0]);
     expect(saved.ticket).toMatchObject({ status: 'todo', priority: 'urgent', labels: ['default'], parent: null, depends_on: [] });
+    expect(saved.ticket.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    await expect(page.locator('.created-at time')).toHaveAttribute('datetime', saved.ticket.created_at);
     await page.getByRole('button', { name: 'New item', exact: true }).click();
     const form = createForm(page);
     await form.getByLabel('Title', { exact: true }).fill('Created with all optional fields');
@@ -508,10 +514,39 @@ test('browser creation honors defaults and optional fields; CLI reads saved byte
     expect(saved.ticket).toMatchObject({ priority: 'urgent', labels: ['label with spaces'], parent: id(6), depends_on: [] });
     expect(saved.source.endsWith('## Browser body 🦊\nNo final newline')).toBe(true);
     expect(saved.ticket.blockers).toEqual([]);
+    const createdAt = saved.ticket.created_at;
+    await expect(page.locator('.created-at time')).toHaveAttribute('datetime', createdAt);
+    await expect(page.locator('.created-at')).toHaveText(`Created ${createdAt.replace('T', ' ').replace('Z', ' UTC')}`);
+    await page.screenshot({ path: testInfo.outputPath('created-at-desktop.png'), fullPage: true });
+    await editForm(page).getByLabel('Status', { exact: true }).selectOption('done');
+    await expect.poll(() => cli('show', created[1]).ticket.status).toBe('done');
+    expect(cli('show', created[1]).ticket.created_at).toBe(createdAt);
+    await page.reload();
+    await expect(page.locator('.created-at time')).toHaveAttribute('datetime', createdAt);
+    await page.setViewportSize({ width: 320, height: 844 });
+    await page.locator('.created-at').scrollIntoViewIfNeeded();
+    expect(await page.locator('#detail').evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('created-at-mobile.png'), fullPage: true });
   } finally {
     for (const item of created) await rm(join(root, '.wrk', `${item}.md`), { force: true });
     await writeFile(configPath, config);
   }
+});
+
+test('creation date is read-only UTC metadata and legacy items remain unknown after edits', async ({ page }) => {
+  const original = await readFile(ticketPath(40));
+  try {
+    await ready(page, `#item=${id(40)}`);
+    await expect(page.locator('.created-at')).toHaveText('Created date unknown');
+    await expect(page.locator('.created-at time')).toHaveCount(0);
+    await editForm(page).getByLabel('Status', { exact: true }).selectOption('in-progress');
+    await expect.poll(() => cli('show', id(40)).ticket.status).toBe('in-progress');
+    expect(cli('show', id(40)).ticket.created_at).toBeNull();
+    await ticket(40, 'Historical timestamp', 'todo', 'created_at: 2024-02-29T23:15:30.123456789-04:30\n');
+    await expect(page.locator('.created-at')).toHaveText('Created 2024-03-01 03:45:30.123 UTC', { timeout: 2000 });
+    await expect(page.locator('.created-at time')).toHaveAttribute('datetime', '2024-02-29T23:15:30.123456789-04:30');
+    await expect(page.locator('.created-at input, .created-at button')).toHaveCount(0);
+  } finally { await writeFile(ticketPath(40), original); }
 });
 
 test('accessible edit fields, all statuses, quick reopening, clearing and shared cycle errors', async ({ page }) => {
@@ -1869,7 +1904,11 @@ test('inline repeated children use defaults and explicit parents with confirmed,
     await form.getByRole('button', { name: 'Create child', exact: true }).click();
     await expect(title).toHaveValue(''); await expect(title).toBeFocused();
     expect(payloads).toEqual([{ title: 'First sibling', parent: id(2) }, { title: 'Second sibling', parent: id(2) }]);
-    for (const child of created) expect(cli('show', child).ticket).toMatchObject({ parent: id(2), labels: ['project-default'], status: 'todo', priority: 'high' });
+    for (const child of created) {
+      const saved = cli('show', child).ticket;
+      expect(saved).toMatchObject({ parent: id(2), labels: ['project-default'], status: 'todo', priority: 'high' });
+      expect(saved.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    }
     await expect(page.locator('#detail')).toBeHidden();
     await page.screenshot({ path: testInfo.outputPath('inline-children-desktop.png'), fullPage: true });
     for (const width of [320, 390, 760]) {
@@ -1882,6 +1921,9 @@ test('inline repeated children use defaults and explicit parents with confirmed,
     for (const child of created) await expect(page.locator(`[data-row="${child}"]`)).toHaveCount(0);
     await page.getByRole('searchbox').fill('');
     await expect(toggleRow(page, 2)).toHaveAttribute('aria-expanded', 'false');
+    await toggleRow(page, 2).click();
+    await page.locator(`#items a[data-item="${created[0]}"]`).click();
+    await expect(page.locator('.created-at time')).toHaveAttribute('datetime', cli('show', created[0]).ticket.created_at);
     cli('validate');
   } finally {
     release?.();

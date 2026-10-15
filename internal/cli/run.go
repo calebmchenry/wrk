@@ -198,9 +198,13 @@ func blockerText(blockers []project.Blocker) string {
 	return strings.Join(ss, ", ")
 }
 func listText(tickets []project.Summary) string {
-	lines := []string{"ID\tSTATUS\tPRIORITY\tTITLE\tBLOCKERS"}
+	lines := []string{"ID\tSTATUS\tPRIORITY\tTITLE\tBLOCKERS\tCREATED_AT"}
 	for _, t := range tickets {
-		lines = append(lines, fmt.Sprintf("%s\t%s\t%s\t%s\t%s", t.ID, t.Status, t.Priority, t.Title, blockerText(t.Blockers)))
+		createdAt := "unknown"
+		if t.CreatedAt != nil {
+			createdAt = *t.CreatedAt
+		}
+		lines = append(lines, fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s", t.ID, t.Status, t.Priority, t.Title, blockerText(t.Blockers), createdAt))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -225,6 +229,9 @@ func renderMutation(out, errout io.Writer, r Request, e Envelope, m store.Mutati
 		}
 		e.Result = result
 		human = fmt.Sprintf("%s %s", summary.ID, summary.Path)
+		if r.Command == "new" && summary.CreatedAt != nil {
+			human += " (created " + *summary.CreatedAt + ")"
+		}
 		if !m.Changed && !m.Created {
 			human += " (unchanged)"
 		}

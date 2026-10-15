@@ -28,7 +28,7 @@ type idleOutput struct {
 
 func (w *idleOutput) Write(p []byte) (int, error) {
 	n, err := w.buffer.Write(p)
-	if strings.Contains(w.buffer.String(), "Waiting: no unprocessed matches") {
+	if strings.Contains(w.buffer.String(), "WAITING  ") {
 		w.once.Do(func() { close(w.ready) })
 	}
 	return n, err
@@ -103,7 +103,7 @@ func TestRunStreamWhileIdle(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("stream did not finish promptly")
 			}
-			if !strings.Contains(stdout.String(), fmt.Sprintf("Run %s: %d successful actions.", reason, len(ids))) || !strings.Contains(stderr.String(), "Left idle after") {
+			if !strings.Contains(stdout.String(), fmt.Sprintf("%d successful actions", len(ids))) || !strings.Contains(strings.ToLower(stdout.String()), reason) || (!strings.Contains(stderr.String(), "RESUMED  ") && !strings.Contains(stderr.String(), "WAIT END  ")) {
 				t.Fatalf("missing lifecycle output: %s\n%s", stdout.String(), stderr.String())
 			}
 			got := actionIDs(t, root)

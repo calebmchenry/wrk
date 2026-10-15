@@ -338,14 +338,27 @@ func TestRunHumanFailureIncludesRetry(t *testing.T) {
 	if err := cmd.Run(); err == nil {
 		t.Fatal("failure succeeded")
 	}
-	for _, value := range []string{"0 successful actions", "'--ticket' '" + ids[0] + "'", "'--expect-status' 'done'", "'--project' '" + root + "'", "'space and '\"'\"'quote'\"'\"''", "'$(literal)'", "''"} {
+	for _, value := range []string{"0 successful actions", "'--project' '" + root + "'", "Show ticket:", "Exact retry (view/copy): cat ", "RUN_EXIT", "Stdout:", "Stderr:", "Inspect partial changes"} {
 		if !strings.Contains(out.String(), value) {
 			t.Errorf("missing %q in %s", value, out.String())
 		}
 	}
-	for _, value := range []string{"Starting " + ids[0], "Finished " + ids[0], "exit 7", "RUN_EXIT"} {
+	for _, value := range []string{"START  " + ids[0], "FAILED  " + ids[0], "child exit 7"} {
 		if !strings.Contains(errout.String(), value) {
 			t.Errorf("missing %q in %s", value, errout.String())
+		}
+	}
+	files, err := filepath.Glob(filepath.Join(root, ".wrk-runs", "*", "retry.sh"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("retry files: %v %v", files, err)
+	}
+	retry, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"'--ticket' '" + ids[0] + "'", "'--expect-status' 'done'", "'--project' '" + root + "'", "'space and '\"'\"'quote'\"'\"''", "'$(literal)'", "''"} {
+		if !strings.Contains(string(retry), value) {
+			t.Errorf("missing %q in %s", value, retry)
 		}
 	}
 	if !reflect.DeepEqual(actionIDs(t, root), ids[:1]) {

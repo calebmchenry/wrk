@@ -147,38 +147,36 @@ func TestRunRecordsAndChildIsolation(t *testing.T) {
 }
 
 func TestHumanRunningAndIdleOutput(t *testing.T) {
-	for _, terminal := range []bool{false, true} {
-		t.Run(map[bool]string{false: "redirected", true: "terminal"}[terminal], func(t *testing.T) {
-			var out, errout bytes.Buffer
-			w := &runOutput{out: &out, errout: &errout, terminal: terminal}
-			now := time.Now()
-			e := runner.Event{Kind: "heartbeat", Time: now, Action: &runner.Action{Sequence: 1, Ticket: project.Summary{ID: "wrk-12345678"}, Elapsed: time.Minute + 2*time.Second}}
-			if err := w.human(runRecord{Event: e}, nil); err != nil {
-				t.Fatal(err)
-			}
-			e.Action.Output.LastOutput = &now
-			e.Time = now.Add(15 * time.Second)
-			if err := w.human(runRecord{Event: e}, nil); err != nil {
-				t.Fatal(err)
-			}
-			e.Kind = "action_finished"
-			if err := w.human(runRecord{Event: e}, nil); err != nil {
-				t.Fatal(err)
-			}
-			text := errout.String()
-			if !strings.Contains(text, "elapsed 1m2s; no child output observed") || !strings.Contains(text, "last child output 15s ago") || !strings.Contains(text, "Finished wrk-12345678") {
+	t.Run("append-only", func(t *testing.T) {
+		var out, errout bytes.Buffer
+		w := &runOutput{out: &out, errout: &errout}
+		now := time.Now()
+		e := runner.Event{Kind: "heartbeat", Time: now, Action: &runner.Action{Sequence: 1, Ticket: project.Summary{ID: "wrk-12345678"}, Elapsed: time.Minute + 2*time.Second}}
+		if err := w.human(runRecord{Event: e}, nil); err != nil {
+			t.Fatal(err)
+		}
+		e.Action.Output.LastOutput = &now
+		e.Time = now.Add(15 * time.Second)
+		if err := w.human(runRecord{Event: e}, nil); err != nil {
+			t.Fatal(err)
+		}
+		e.Kind = "action_finished"
+		if err := w.human(runRecord{Event: e}, nil); err != nil {
+			t.Fatal(err)
+		}
+		text := errout.String()
+		if !strings.Contains(text, "elapsed 1m2s | no output yet") || !strings.Contains(text, "last output 15s ago") || !strings.Contains(text, "OK  wrk-12345678") {
+			t.Fatal(text)
+		}
+		if strings.ContainsAny(text, "\x1b\r") {
+			t.Fatalf("wrong controls %q", text)
+		}
+		for _, invented := range []string{"ETA", "%", "hung", "testing", "implementing"} {
+			if strings.Contains(text, invented) {
 				t.Fatal(text)
 			}
-			if strings.Contains(text, "\x1b[2K") != terminal || strings.Contains(text, "\r") != terminal {
-				t.Fatalf("wrong controls %q", text)
-			}
-			for _, invented := range []string{"ETA", "%", "hung", "testing", "implementing"} {
-				if strings.Contains(text, invented) {
-					t.Fatal(text)
-				}
-			}
-		})
-	}
+		}
+	})
 	var out, errout bytes.Buffer
 	w := &runOutput{out: &out, errout: &errout}
 	e := runner.Event{Kind: "idle_started", PollInterval: 5 * time.Second, Idle: &runner.Idle{}, SelectionCounts: runner.SelectionCounts{Matches: 3, Processed: 3, Scope: runner.ScopeCounts{Ready: 1, Waiting: 2, InProgress: 3, Blocked: 4, Done: 5, Canceled: 6}}}
@@ -192,12 +190,114 @@ func TestHumanRunningAndIdleOutput(t *testing.T) {
 	}
 }
 
+func TestRunHumanMultilineCommandAndCompletionFailure(t *testing.T) {
+	root, id := outputProject(t)
+	status := "in-progress"
+	if m := store.Update(root, id, nil, &status); len(m.Diagnostics) != 0 {
+		t.Fatal(m.Diagnostics)
+	}
+	prompt := "Implement {id}.\n\n    " + strings.Repeat("Long prompt with 'quotes' and $variables. ", 100)
+	r, err := Parse([]string{"run", "--ticket", id, "--expect-status=done", "--", "/bin/sh", "-c", "exit 0", "", prompt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out, errout bytes.Buffer
+	if code := runActions(r, root, root, &out, &errout); code != 1 {
+		t.Fatal(code)
+	}
+	combined := out.String() + errout.String()
+	for _, want := range []string{"RUN  /bin/sh (4 arguments; full argv in run log)", "START  " + id, "FAILED  " + id, "completion check failed", "child exit 0", "expected status done; observed in-progress", "0 successful actions", "Run:", "Stdout:", "Stderr:", "Show ticket:", "Exact retry (view/copy): cat "} {
+		if !strings.Contains(combined, want) {
+			t.Errorf("missing %q: %s", want, combined)
+		}
+	}
+	if strings.Contains(combined, "Long prompt") || strings.ContainsAny(combined, "\x1b\r") || strings.Count(combined, "RUN_COMPLETION:") != 1 {
+		t.Fatalf("noisy/corrupt output: %s", combined)
+	}
+	files, err := filepath.Glob(filepath.Join(root, ".wrk-runs", "*", "run.jsonl"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("logs: %v %v", files, err)
+	}
+	data, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last runRecord
+	for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
+		var envelope struct{ Result runRecord }
+		if err := json.Unmarshal(line, &envelope); err != nil {
+			t.Fatal(err)
+		}
+		last = envelope.Result
+		if !reflect.DeepEqual(last.Command, r.ChildCommand) {
+			t.Fatalf("template changed: %q", last.Command)
+		}
+	}
+	if got := last.Result.LastAction.Command[4]; got != strings.ReplaceAll(prompt, "{id}", id) {
+		t.Fatalf("expanded prompt changed: %q", got)
+	}
+	retry, err := os.ReadFile(last.RetryFile)
+	if err != nil || !bytes.HasSuffix(retry, []byte(last.RetryCommand+"\n")) {
+		t.Fatalf("retry differs: %q %v", retry, err)
+	}
+	info, err := os.Stat(last.RetryFile)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("retry permissions: %v %v", info, err)
+	}
+}
+
+func TestRunVerboseSeparatesPartialLines(t *testing.T) {
+	root, _ := outputProject(t)
+	r, err := Parse([]string{"run", "--verbose", "--", "/bin/sh", "-c", "printf 'partial stdout'; printf 'partial stderr' >&2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out, errout bytes.Buffer
+	if code := runActions(r, root, root, &out, &errout); code != 0 {
+		t.Fatal(code)
+	}
+	if !strings.Contains(errout.String(), "\nOK  ") || strings.ContainsAny(errout.String(), "\x1b\r") {
+		t.Fatalf("merged finish: %q", errout.String())
+	}
+	// JSON verbose keeps the raw live byte stream; no human separator leaks in.
+	r.JSON = true
+	out.Reset()
+	errout.Reset()
+	if code := runActions(r, root, root, &out, &errout); code != 0 || errout.Len() != len("partial stdoutpartial stderr") {
+		t.Fatalf("JSON verbose changed: %d %q", code, errout.String())
+	}
+}
+
+func TestRunStyleAndUntrustedValues(t *testing.T) {
+	s := runStyle{color: true}
+	for label, code := range map[string]string{"RUNNING": "34", "WAITING": "35", "OK": "32", "FAILED": "31"} {
+		if got := s.state(label); got != "\x1b[1;"+code+"m"+label+"\x1b[0m" {
+			t.Fatal(got)
+		}
+	}
+	if got := s.emphasis("title\n\t\x1b[31m"); got != "\x1b[1mtitle\\n\\t\\u001b[31m\x1b[0m" {
+		t.Fatalf("unescaped data: %q", got)
+	}
+	var b bytes.Buffer
+	if styleForRun(&b, false) != (runStyle{}) {
+		t.Fatal("styled a buffer")
+	}
+	f, err := os.CreateTemp(t.TempDir(), "redirected")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if styleForRun(f, false) != (runStyle{}) || styleForRun(f, true) != (runStyle{}) {
+		t.Fatal("styled redirected output")
+	}
+}
+
 type failedRunWriter struct{}
 
 func (failedRunWriter) Write([]byte) (int, error) { return 0, errors.New("destination failed") }
 
 func TestLogAndEventFailuresStopExecution(t *testing.T) {
-	for _, mode := range []string{"run log", "child log", "heartbeat output", "live output", "close child", "close run", "create child"} {
+	for _, mode := range []string{"run log", "child log", "heartbeat output", "live output", "close child", "close run", "create child", "create retry"} {
 		t.Run(mode, func(t *testing.T) {
 			root, _ := outputProject(t)
 			if m := store.Create(root, store.CreateOptions{Title: "Must not run next"}); len(m.Diagnostics) != 0 {
@@ -215,6 +315,12 @@ func TestLogAndEventFailuresStopExecution(t *testing.T) {
 			if mode == "close child" || mode == "close run" {
 				o.Command[2] = "exit 0"
 				o.MaxTickets = 1
+			}
+			if mode == "create retry" {
+				o.Command[2] = "exit 7"
+				if err := os.WriteFile(filepath.Join(w.dir, "retry.sh"), nil, 0600); err != nil {
+					t.Fatal(err)
+				}
 			}
 			o.OnEvent = func(e runner.Event) error {
 				if e.Kind == "action_started" {

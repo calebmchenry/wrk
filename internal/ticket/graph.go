@@ -15,8 +15,8 @@ import (
 func emissionGraph(root *yaml.Node) (*yaml.Node, error) {
 	seen := map[*yaml.Node]*yaml.Node{}
 	anchors := 0
-	var visit func(*yaml.Node) (*yaml.Node, error)
-	visit = func(n *yaml.Node) (*yaml.Node, error) {
+	var visit func(*yaml.Node, bool) (*yaml.Node, error)
+	visit = func(n *yaml.Node, flow bool) (*yaml.Node, error) {
 		n = schema.Resolve(n)
 		if n == nil {
 			return nil, fmt.Errorf("unresolved YAML alias")
@@ -30,9 +30,15 @@ func emissionGraph(root *yaml.Node) (*yaml.Node, error) {
 		}
 		out := *n
 		out.Anchor, out.Alias, out.Content = "", nil, nil
+		// The YAML encoder quotes timestamps in flow collections without
+		// retaining their implicit tag. Make it explicit to preserve their type,
+		// including timestamps reached through a created_at alias.
+		if flow && out.Kind == yaml.ScalarNode && out.Tag == "!!timestamp" {
+			out.Style |= yaml.TaggedStyle
+		}
 		seen[n] = &out
 		for _, child := range n.Content {
-			value, err := visit(child)
+			value, err := visit(child, flow || n.Style&yaml.FlowStyle != 0)
 			if err != nil {
 				return nil, err
 			}
@@ -40,5 +46,5 @@ func emissionGraph(root *yaml.Node) (*yaml.Node, error) {
 		}
 		return &out, nil
 	}
-	return visit(root)
+	return visit(root, false)
 }

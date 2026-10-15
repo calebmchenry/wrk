@@ -5,11 +5,12 @@
 Use this project's own CLI to track work in [`.wrk/`](../.wrk/). Follow the [daily workflow](#daily-workflow) for each task, read relevant tickets before starting work, and keep their context current as work progresses.
 
 - [Ticket format and editing rules](ticket-format.md)
+- [Creation timestamps, unknown dates, and older-client compatibility](ticket-format.md#creation-timestamps)
 - [Project configuration](configuration.md)
 - [Explicit project/config selection and path behavior](cli.md#project-selection)
 - [CLI commands and output contract](cli.md)
 - [Scoped command execution, continuous polling, success checks, and explicit retry](cli.md#scoped-command-execution)
-- [Run logs, terminal progress, and JSON events](cli.md#run-output-and-logs) and [verification evidence](run-output-verification.md)
+- [Run logs, compact colored progress, retry files, and JSON events](cli.md#run-output-and-logs) and [PTY/redirected verification evidence](run-output-verification.md#compact-output-review-2026-10-15)
 - [Local server, read APIs, lifecycle output, and resource limits](cli.md#local-server)
 - [Compact workspace layout](browser.md#compact-workspace-layout)
 - [Browser filters, navigation, Markdown policy, and browser verification](browser.md)
